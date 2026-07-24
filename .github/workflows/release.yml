@@ -32,7 +32,7 @@ jobs:
           persist-credentials: false
 
       # Same cache as ci.yml so a release run usually restores the warm build
-      # state seeded by CI on main.
+      # state seeded by CI on master.
       - name: Cache Xcode build
         uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
         with:
@@ -60,22 +60,22 @@ jobs:
           echo "prerelease=$PRERELEASE" >> "$GITHUB_OUTPUT"
           echo "Version: $VERSION (prerelease: $PRERELEASE)"
 
-      - name: Require green CI on main
+      - name: Require green CI on master
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           CONCLUSION="$(gh run list \
             --workflow ci.yml \
-            --branch main \
+            --branch master \
             --status completed \
             --limit 1 \
             --json conclusion \
             --jq '.[0].conclusion // empty')"
           if [[ "$CONCLUSION" != "success" ]]; then
-            echo "Latest completed CI run on main is '${CONCLUSION:-none}' — releases require green CI on main." >&2
+            echo "Latest completed CI run on master is '${CONCLUSION:-none}' — releases require green CI on master." >&2
             exit 1
           fi
-          echo "CI on main is green."
+          echo "CI on master is green."
 
       - name: Show Xcode and Swift toolchain
         run: |

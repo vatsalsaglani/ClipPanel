@@ -1,7 +1,7 @@
 name: Deploy site
 
 # Publishes the landing site (site/) to this repo's GitHub Pages, but ONLY
-# after the CI workflow has passed on main — so a broken build or failing
+# after the CI workflow has passed on master — so a broken build or failing
 # test never ships the website. It keys off CI via workflow_run rather than
 # a plain push trigger so "deploy after CI and tests pass" is literally what
 # happens.
@@ -9,7 +9,7 @@ on:
   workflow_run:
     workflows: ["CI"]
     types: [completed]
-    branches: [main]
+    branches: [master]
   # Manual redeploy (e.g. after changing Pages settings) without a new commit.
   workflow_dispatch:
 
@@ -40,7 +40,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           # For workflow_run, check out the exact SHA CI ran on (not just
-          # the latest main); for manual runs, the default checkout is fine.
+          # the latest master); for manual runs, the default checkout is fine.
           ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
       - name: Set up Node
