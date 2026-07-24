@@ -1,0 +1,33 @@
+{
+  "name": "clippanel-site",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "serve": "npx --yes serve@latest out",
+    "assets": "node scripts/build-og.mjs && node scripts/build-icons.mjs",
+    "check:copy": "node scripts/check-copy.mjs",
+    "verify": "node scripts/verify.mjs",
+    "audit": "node scripts/lighthouse.mjs"
+  },
+  "dependencies": {
+    "clsx": "^2.1.1",
+    "lucide-react": "^0.469.0",
+    "next": "^15.3.4",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "tailwind-merge": "^3.6.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.0.0",
+    "@types/node": "^22.10.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "puppeteer-core": "^25.3.0",
+    "sharp": "^0.33.5",
+    "tailwindcss": "^4.0.0",
+    "text-to-svg": "^3.1.5",
+    "typescript": "^5.7.0"
+  }
+}
