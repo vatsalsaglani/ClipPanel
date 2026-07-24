@@ -1,0 +1,176 @@
+name: Release
+
+# Branch-driven releases: pushing release/v<semver> publishes a GitHub
+# release for that version. A hyphenated version (release/v0.1.0-beta) is
+# published as a pre-release. The release tag (v<semver>) is created
+# automatically by the release itself — no manual tag management.
+on:
+  push:
+    branches:
+      - "release/v*"
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  release:
+    name: Build and publish
+    runs-on: macos-26
+    # Must cover a cold Xcode build plus the unit-test suite plus packaging —
+    # same reasoning as ci.yml's timeout.
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+
+      # Same cache as ci.yml so a release run usually restores the warm build
+      # state seeded by CI on main.
+      - name: Cache Xcode build
+        uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: |
+            .build
+            ~/Library/Caches/org.swift.swiftpm
+          key: xcode-${{ runner.os }}-${{ hashFiles('ClipPanel.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved', 'project.yml') }}
+          restore-keys: |
+            xcode-${{ runner.os }}-
+
+      - name: Derive version from branch name
+        id: version
+        run: |
+          BRANCH="${GITHUB_REF_NAME}"
+          VERSION="${BRANCH#release/v}"
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?$ ]]; then
+            echo "Branch '$BRANCH' does not encode a version (expected release/v<major>.<minor>.<patch>[-suffix])." >&2
+            exit 1
+          fi
+          PRERELEASE=false
+          if [[ "$VERSION" == *-* ]]; then
+            PRERELEASE=true
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$PRERELEASE" >> "$GITHUB_OUTPUT"
+          echo "Version: $VERSION (prerelease: $PRERELEASE)"
+
+      - name: Require green CI on main
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          CONCLUSION="$(gh run list \
+            --workflow ci.yml \
+            --branch main \
+            --status completed \
+            --limit 1 \
+            --json conclusion \
+            --jq '.[0].conclusion // empty')"
+          if [[ "$CONCLUSION" != "success" ]]; then
+            echo "Latest completed CI run on main is '${CONCLUSION:-none}' — releases require green CI on main." >&2
+            exit 1
+          fi
+          echo "CI on main is green."
+
+      - name: Show Xcode and Swift toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+
+      - name: Stamp version into Info.plist
+        # CFBundleShortVersionString in ClipPanel/Support/Info.plist is the
+        # version source of truth (the project sets no MARKETING_VERSION), so
+        # the packaged bundle inherits the stamped value at build time.
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" ClipPanel/Support/Info.plist
+          test "$(plutil -extract CFBundleShortVersionString raw ClipPanel/Support/Info.plist)" = "$VERSION"
+
+      - name: Build and run unit tests
+        # Same gate as ci.yml: a release never ships from a red test suite.
+        run: >-
+          xcodebuild
+          -project ClipPanel.xcodeproj
+          -scheme ClipPanel
+          -configuration Debug
+          -derivedDataPath .build/XcodeDerivedData
+          test
+          CODE_SIGNING_ALLOWED=NO
+
+      - name: Package app bundle
+        # Release-configuration build staged at dist/ClipPanel.app, ad-hoc
+        # signed, never launched (see script/build_and_run.sh).
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          ./script/build_and_run.sh --package
+          test "$(plutil -extract CFBundleShortVersionString raw dist/ClipPanel.app/Contents/Info.plist)" = "$VERSION"
+
+      - name: Zip app bundle
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          ditto -c -k --keepParent dist/ClipPanel.app "ClipPanel-v${VERSION}-macos-arm64.zip"
+          shasum -a 256 "ClipPanel-v${VERSION}-macos-arm64.zip" | tee checksum.txt
+
+      - name: Write release notes
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          CHECKSUM="$(cut -d' ' -f1 checksum.txt)"
+          cat > release-notes.md <<NOTES
+          ## ClipPanel v${VERSION}
+
+          Local-first macOS clipboard history utility. Apple Silicon build.
+
+          ### Install
+
+          1. Download and unzip \`ClipPanel-v${VERSION}-macos-arm64.zip\`.
+          2. Move \`ClipPanel.app\` wherever you like (e.g. \`/Applications\`).
+          3. ClipPanel is not yet signed or notarized, so remove the
+             quarantine flag once before first launch:
+
+             \`\`\`sh
+             xattr -dr com.apple.quarantine /path/to/ClipPanel.app
+             \`\`\`
+
+          4. Launch ClipPanel and enable clipboard monitoring in onboarding.
+
+          SHA-256: \`${CHECKSUM}\`
+
+          Built from \`${GITHUB_REF_NAME}\` @ ${GITHUB_SHA}.
+          NOTES
+
+      - name: Create or update GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+          PRERELEASE: ${{ steps.version.outputs.prerelease }}
+        run: |
+          TAG="v${VERSION}"
+          ASSET="ClipPanel-v${VERSION}-macos-arm64.zip"
+          FLAGS=(--title "ClipPanel v${VERSION}" --notes-file release-notes.md)
+          if [[ "$PRERELEASE" == "true" ]]; then
+            FLAGS+=(--prerelease)
+          fi
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG exists — updating asset and notes."
+            gh release upload "$TAG" "$ASSET" --clobber
+            EDIT_FLAGS=(--title "ClipPanel v${VERSION}" --notes-file release-notes.md)
+            if [[ "$PRERELEASE" == "true" ]]; then
+              EDIT_FLAGS+=(--prerelease)
+            else
+              EDIT_FLAGS+=(--prerelease=false)
+            fi
+            gh release edit "$TAG" "${EDIT_FLAGS[@]}"
+          else
+            gh release create "$TAG" "$ASSET" \
+              --target "$GITHUB_SHA" \
+              "${FLAGS[@]}"
+          fi
