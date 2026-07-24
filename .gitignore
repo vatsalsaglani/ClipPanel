@@ -5,3 +5,5 @@ dist/
 .agents/
 .claude/
 .codex/
+*.docx
+skills-lock.json

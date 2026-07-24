@@ -43,13 +43,22 @@ enum SearchEngine {
                 return $0.lastCopiedAt > $1.lastCopiedAt
             }
         }
+        let searchTerms = parsed.tokens.map(SearchTerm.init)
         let matches: [(ClipboardSearchItem, Int)] = items.compactMap { item in
             guard parsed.matchesFilters(item) else { return nil }
-            let haystack = normalize([item.displayText, item.searchText, item.sourceApplicationName, item.kind.displayName, item.tagNames.joined(separator: " "), item.collectionNames.joined(separator: " ")].compactMap { $0 }.joined(separator: " "))
-            if let expression = parsed.regularExpression, expression.firstMatch(in: haystack, range: NSRange(haystack.startIndex..., in: haystack)) == nil { return nil }
-            let scores = parsed.tokens.compactMap { score(token: $0, in: item) }
-            guard scores.count == parsed.tokens.count else { return nil }
-            return (item, scores.reduce(0, +))
+            if let expression = parsed.regularExpression {
+                let haystack = normalize([item.displayText, item.searchText, item.sourceApplicationName, item.kind.displayName, item.tagNames.joined(separator: " "), item.collectionNames.joined(separator: " ")].compactMap { $0 }.joined(separator: " "))
+                if expression.firstMatch(in: haystack, range: NSRange(haystack.startIndex..., in: haystack)) == nil { return nil }
+            }
+            guard !searchTerms.isEmpty else { return (item, 0) }
+
+            let fields = NormalizedSearchFields(item)
+            var totalScore = 0
+            for term in searchTerms {
+                guard let score = score(term: term, in: fields) else { return nil }
+                totalScore += score
+            }
+            return (item, totalScore)
         }
         return matches.sorted {
             if $0.1 != $1.1 { return $0.1 > $1.1 }
@@ -61,8 +70,8 @@ enum SearchEngine {
 
     static func normalize(_ value: String) -> String {
         value.folding(options: [.caseInsensitive, .diacriticInsensitive, .widthInsensitive], locale: .current)
-            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .split(whereSeparator: \.isWhitespace)
+            .joined(separator: " ")
     }
 
     static func displayMatchRanges(query: String, in value: String) -> [Range<String.Index>] {
@@ -76,27 +85,31 @@ enum SearchEngine {
     /// Prefer the result users can immediately see in the panel. Full clipboard text remains
     /// searchable, but a title match should not lose to a newer record whose match is buried in
     /// long body text or metadata.
-    private static func score(token: String, in item: ClipboardSearchItem) -> Int? {
-        let titleScore = score(token: token, in: normalize(item.displayText))
-        let contentScore = score(token: token, in: normalize(item.searchText))
-        let sourceScore = score(token: token, in: normalize(item.sourceApplicationName ?? ""))
-        let tagScore = score(token: token, in: normalize(item.tagNames.joined(separator: " ")))
-        let collectionScore = score(token: token, in: normalize(item.collectionNames.joined(separator: " ")))
-        return [
-            titleScore.map { $0 * 5 },
-            contentScore.map { $0 * 2 },
-            sourceScore,
-            tagScore,
-            collectionScore
-        ].compactMap { $0 }.max()
+    private static func score(term: SearchTerm, in fields: NormalizedSearchFields) -> Int? {
+        var bestScore = score(term: term, in: fields.title).map { $0 * 5 }
+        if let content = fields.content, let contentScore = score(term: term, in: content).map({ $0 * 2 }),
+           contentScore > (bestScore ?? .min) {
+            bestScore = contentScore
+        }
+        if let sourceScore = score(term: term, in: fields.source), sourceScore > (bestScore ?? .min) {
+            bestScore = sourceScore
+        }
+        if let tagScore = score(term: term, in: fields.tags), tagScore > (bestScore ?? .min) {
+            bestScore = tagScore
+        }
+        if let collectionScore = score(term: term, in: fields.collections), collectionScore > (bestScore ?? .min) {
+            bestScore = collectionScore
+        }
+        return bestScore
     }
 
-    private static func score(token: String, in value: String) -> Int? {
-        if value == token { return 1_000 }
-        if value.hasPrefix(token) { return 800 }
-        if value.range(of: "\\b\(NSRegularExpression.escapedPattern(for: token))", options: .regularExpression) != nil { return 650 }
-        if value.contains(token) { return 450 }
-        return isSubsequence(token, of: value) ? 100 : nil
+    private static func score(term: SearchTerm, in value: String) -> Int? {
+        if value == term.value { return 1_000 }
+        if value.hasPrefix(term.value) { return 800 }
+        guard !value.isEmpty else { return nil }
+        if term.wordBoundaryExpression.firstMatch(in: value, range: NSRange(value.startIndex..., in: value)) != nil { return 650 }
+        if value.contains(term.value) { return 450 }
+        return isSubsequence(term.value, of: value) ? 100 : nil
     }
 
     private static func isSubsequence(_ needle: String, of haystack: String) -> Bool {
@@ -106,6 +119,37 @@ enum SearchEngine {
             start = haystack.index(after: found)
         }
         return true
+    }
+
+    private struct SearchTerm {
+        let value: String
+        let wordBoundaryExpression: NSRegularExpression
+
+        init(_ value: String) {
+            self.value = value
+            wordBoundaryExpression = try! NSRegularExpression(pattern: "\\b\(NSRegularExpression.escapedPattern(for: value))")
+        }
+    }
+
+    private struct NormalizedSearchFields {
+        let title: String
+        let content: String?
+        let source: String
+        let tags: String
+        let collections: String
+
+        init(_ item: ClipboardSearchItem) {
+            title = SearchEngine.normalize(item.displayText)
+            if item.searchText == item.displayText {
+                content = nil
+            } else {
+                let normalizedContent = SearchEngine.normalize(item.searchText)
+                content = normalizedContent == title ? nil : normalizedContent
+            }
+            source = item.sourceApplicationName.map(SearchEngine.normalize) ?? ""
+            tags = item.tagNames.isEmpty ? "" : SearchEngine.normalize(item.tagNames.joined(separator: " "))
+            collections = item.collectionNames.isEmpty ? "" : SearchEngine.normalize(item.collectionNames.joined(separator: " "))
+        }
     }
 }
 
