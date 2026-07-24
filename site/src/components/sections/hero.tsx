@@ -1,7 +1,7 @@
-import { cta, hero, releaseReady, site } from "@/content";
+import { cta, hero, releaseReady } from "@/content";
 import { PanelDemo } from "../panel-demo";
 import { NotifyForm } from "../notify-form";
-import { ButtonLink } from "../ui/button";
+import { DownloadCta } from "../download-cta";
 import { Eyebrow } from "../section";
 
 /** §5.1 Hero — demonstration over persuasion. */
@@ -21,9 +21,7 @@ export function Hero() {
           <div className="mt-9">
             {releaseReady ? (
               <>
-                <ButtonLink size="lg" href={site.downloadUrl}>
-                  {cta.download}
-                </ButtonLink>
+                <DownloadCta size="lg" />
                 <p className="mt-3 text-sm text-ink-400">{hero.ctaSubtext}</p>
               </>
             ) : (

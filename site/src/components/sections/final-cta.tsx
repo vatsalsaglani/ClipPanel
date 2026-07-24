@@ -1,24 +1,22 @@
-import { cta, finalCta, releaseReady, site } from "@/content";
+import { cta, finalCta, releaseReady } from "@/content";
 import { Section, SectionTitle } from "../section";
 import { Reveal } from "../reveal";
 import { NotifyForm } from "../notify-form";
 import { ComingSoonLink } from "../coming-soon-link";
-import { ButtonLink } from "../ui/button";
+import { DownloadCta } from "../download-cta";
 
 /** §5.10 Final CTA band. */
 export function FinalCta() {
   return (
     <Section id="download" className="py-28 md:py-36">
       <Reveal className="mx-auto max-w-2xl text-center">
-        <SectionTitle className="md:text-[44px]">{finalCta.h2}</SectionTitle>
+        <SectionTitle>{finalCta.h2}</SectionTitle>
         <p className="mt-4 text-lg text-ink-400">{finalCta.sub}</p>
 
         <div className="mt-9">
           {releaseReady ? (
             <>
-              <ButtonLink size="lg" href={site.downloadUrl}>
-                {cta.download}
-              </ButtonLink>
+              <DownloadCta size="lg" />
               <p className="mt-3 text-sm text-ink-400">{finalCta.ctaSubtext}</p>
             </>
           ) : (

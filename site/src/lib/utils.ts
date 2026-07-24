@@ -1,6 +1,9 @@
-import { clsx, type ClassValue } from "clsx";
-import { twMerge } from "tailwind-merge";
+type ClassValue = string | false | null | undefined;
 
+/**
+ * Tiny className joiner — no dependencies. Call sites never rely on
+ * conflict resolution; overrides are done by passing distinct classes.
+ */
 export function cn(...inputs: ClassValue[]) {
-  return twMerge(clsx(inputs));
+  return inputs.filter(Boolean).join(" ");
 }

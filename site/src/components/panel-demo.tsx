@@ -142,7 +142,7 @@ function Panel({ scene, className }: { scene: Scene; className?: string }) {
     <div
       data-demo-panel
       className={cn(
-        "w-[560px] overflow-hidden rounded-[14px] border border-panel-500/60 bg-midnight-800 shadow-panel transition-[opacity,transform] duration-150 ease-out",
+        "overflow-hidden rounded-[14px] border border-panel-500/60 bg-midnight-800 shadow-panel transition-[opacity,transform] duration-150 ease-out",
         className,
       )}
       style={{
@@ -349,7 +349,7 @@ export function PanelDemo() {
           {/* Faint radial lavender backdrop, ≤10% opacity */}
           <div className="absolute inset-0 bg-stage" />
           <div className="absolute left-1/2 top-5 -translate-x-1/2">
-            <Panel scene={shown} />
+            <Panel scene={shown} className="w-[560px]" />
           </div>
           {!reduced && <PressedKeyChip scene={shown} />}
           {!reduced && <Toast visible={shown.toast} />}

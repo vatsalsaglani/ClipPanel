@@ -26,11 +26,13 @@ export function Keycap({
     <kbd
       aria-hidden="true"
       className={cn(
-        "inline-flex select-none items-center justify-center border border-panel-500 bg-midnight-700 font-mono leading-none text-lavender-200",
+        "inline-flex select-none items-center justify-center border font-mono leading-none text-lavender-200",
         "shadow-[inset_0_-1px_0_0_rgb(13_15_32/0.9),inset_0_1px_0_0_rgb(207_203_255/0.06)]",
         "transition-[transform,background-color,border-color] duration-100",
         sizes[size],
-        pressed && "translate-y-px scale-[0.94] border-panel-600 bg-panel-600",
+        pressed
+          ? "translate-y-px scale-[0.94] border-panel-600 bg-panel-600"
+          : "border-panel-500 bg-midnight-700",
         className,
       )}
     >

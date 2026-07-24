@@ -2,10 +2,11 @@
 
 import { useEffect, useState } from "react";
 import { Menu, X } from "lucide-react";
-import { cta, nav, releaseReady, site } from "@/content";
+import { cta, nav, releaseReady } from "@/content";
 import { cn } from "@/lib/utils";
 import { MenuBarGlyph } from "./brand-icons";
 import { ButtonLink } from "./ui/button";
+import { DownloadCta } from "./download-cta";
 
 /** Sticky, translucent midnight-blur nav (§5.0). Highlights active section. */
 export function Nav() {
@@ -38,7 +39,6 @@ export function Nav() {
     return () => window.removeEventListener("keydown", onKey);
   }, [open]);
 
-  const ctaHref = releaseReady ? site.downloadUrl : "#notify";
   const ctaLabel = releaseReady ? cta.download : cta.notify;
 
   return (
@@ -73,9 +73,13 @@ export function Nav() {
               {link.label}
             </a>
           ))}
-          <ButtonLink size="sm" href={ctaHref}>
-            {ctaLabel}
-          </ButtonLink>
+          {releaseReady ? (
+            <DownloadCta size="sm" />
+          ) : (
+            <ButtonLink size="sm" href="#notify">
+              {ctaLabel}
+            </ButtonLink>
+          )}
         </div>
 
         <button
@@ -106,13 +110,20 @@ export function Nav() {
                 {link.label}
               </a>
             ))}
-            <ButtonLink
-              className="mt-3"
-              href={ctaHref}
-              onClick={() => setOpen(false)}
-            >
-              {ctaLabel}
-            </ButtonLink>
+            {releaseReady ? (
+              <DownloadCta
+                className="mt-3"
+                onNavigate={() => setOpen(false)}
+              />
+            ) : (
+              <ButtonLink
+                className="mt-3"
+                href="#notify"
+                onClick={() => setOpen(false)}
+              >
+                {ctaLabel}
+              </ButtonLink>
+            )}
           </div>
         </div>
       ) : null}

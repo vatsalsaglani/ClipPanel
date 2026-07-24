@@ -8,14 +8,19 @@
  * `npm run check:copy` diffs these strings against the brand doc.
  */
 
-export const releaseReady = process.env.NEXT_PUBLIC_RELEASE_READY === "true";
+/**
+ * Release gate. The beta ships through GitHub Releases, so the default is
+ * the release state; build with NEXT_PUBLIC_RELEASE_READY=false to preview
+ * the pre-release "Get notified at launch" form.
+ */
+export const releaseReady = process.env.NEXT_PUBLIC_RELEASE_READY !== "false";
 
 export const site = {
   name: "ClipPanel",
   url: "https://clippanel.app",
   email: "hello@clippanel.app",
-  // TODO: replace with the real download artifact when the binary ships.
-  downloadUrl: "/download/ClipPanel.dmg",
+  /** Beta downloads ship through GitHub Releases (opened in a new tab). */
+  releasesUrl: "https://github.com/vatsalsaglani/ClipPanel/releases",
   meta: {
     title: "ClipPanel — Clipboard history for macOS, one keystroke away",
     description:
@@ -40,6 +45,35 @@ export const cta = {
   /** Shown when the placeholder endpoint fails. Never fake success. */
   notifyFailure: "Couldn't submit — email hello@clippanel.app instead.",
   comingSoon: "coming soon",
+} as const;
+
+/**
+ * Install dialog — shown after a download click opens GitHub Releases in a
+ * new tab. This is new copy (the brand doc has no install steps yet); keep
+ * it calm, sentence case, and honest about the beta.
+ */
+export const install = {
+  title: "Install the beta",
+  intro:
+    "The releases page just opened in a new tab. Download the latest build, then:",
+  steps: [
+    { id: "move", text: "Move ClipPanel to your Applications folder." },
+    {
+      id: "quarantine",
+      text: "Run this once in Terminal — the beta isn't notarized yet, so macOS quarantines the app:",
+    },
+    {
+      id: "open",
+      text: "Open ClipPanel from Applications. It lives in the menu bar — press ",
+      keycap: "⌃Q",
+      textAfter: " to summon it.",
+    },
+  ],
+  command: "xattr -dr com.apple.quarantine /Applications/ClipPanel.app",
+  copyCommand: "Copy",
+  copiedCommand: "Copied",
+  footnote: "macOS 14+ · Apple Silicon & Intel · Free during beta",
+  close: "Done",
 } as const;
 
 export const nav = {
