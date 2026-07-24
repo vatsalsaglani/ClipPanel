@@ -60,16 +60,23 @@ is fully static — no server runtime, no API routes, no middleware.
 
 ## Release flag
 
-`NEXT_PUBLIC_RELEASE_READY=true npm run build` switches every CTA from the
-pre-release state (inline `Get notified at launch` email form, wired to a
-placeholder endpoint marked `// TODO: point at real endpoint` in
-`src/components/notify-form.tsx`) to `Download for macOS` buttons pointing at
-`site.downloadUrl` in `src/content.ts`. Default is `false`.
+The beta ships through GitHub Releases, so the default build is the
+**release state**: every `Download for macOS` button is a real
+`target="_blank" rel="noopener noreferrer"` anchor to
+`https://github.com/vatsalsaglani/ClipPanel/releases` and additionally opens
+the install-steps dialog (`src/components/install-dialog.tsx` — move to
+Applications, `xattr -dr com.apple.quarantine /Applications/ClipPanel.app`
+once in Terminal because the beta is not notarized, then launch). Build with
+`NEXT_PUBLIC_RELEASE_READY=false` to preview the pre-release state (inline
+`Get notified at launch` email form, wired to a placeholder endpoint marked
+`// TODO: point at real endpoint` in `src/components/notify-form.tsx`).
 
-## Known placeholders (intentional, pre-release)
+## Known placeholders (intentional)
 
-- `https://clippanel.app`, `hello@clippanel.app`, `/download/ClipPanel.dmg`
-  — replace in `src/content.ts` when real.
+- `https://clippanel.app` and `hello@clippanel.app` — replace in
+  `src/content.ts` when real.
+- The install-dialog copy is new (the brand doc has no install steps yet);
+  it is allowlisted in `scripts/check-copy.mjs`.
 - The §5.6 visual is the panel recreation standing in for a real screenshot;
   swap 1:1 when app captures exist (brand doc §8).
 - Changelog, Roadmap, License render tasteful inline "coming soon" notes
