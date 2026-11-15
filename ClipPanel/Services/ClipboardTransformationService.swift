@@ -8,6 +8,7 @@ enum ClipboardTextTransformation: String, CaseIterable, Identifiable, Sendable {
     case titlecase
     case stripFormatting
     case cleanURL
+    case extractURLs
 
     var id: String { rawValue }
     var title: String {
@@ -18,6 +19,7 @@ enum ClipboardTextTransformation: String, CaseIterable, Identifiable, Sendable {
         case .titlecase: "Title Case"
         case .stripFormatting: "Strip formatting"
         case .cleanURL: "Clean URL"
+        case .extractURLs: "Extract URLs"
         }
     }
 }
@@ -34,6 +36,10 @@ enum ClipboardTransformationService {
         case .titlecase: text = originalText.capitalized
         case .stripFormatting: text = originalText
         case .cleanURL: text = cleanedURL(originalText) ?? originalText
+        case .extractURLs:
+            let links = extractedURLs(originalText)
+            guard !links.isEmpty else { return nil }
+            text = links.joined(separator: "\n")
         }
         let representation = ClipboardRepresentation(typeIdentifier: NSPasteboard.PasteboardType.string.rawValue, data: Data(text.utf8))
         return ClipboardPayload(items: [ClipboardPayloadItem(representations: [representation])])
@@ -45,6 +51,18 @@ enum ClipboardTransformationService {
         guard transformed != text else { return nil }
         let representation = ClipboardRepresentation(typeIdentifier: NSPasteboard.PasteboardType.string.rawValue, data: Data(transformed.utf8))
         return ClipboardPayload(items: [ClipboardPayloadItem(representations: [representation])])
+    }
+
+    private static func extractedURLs(_ value: String) -> [String] {
+        guard let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) else { return [] }
+        var seen = Set<String>()
+        return detector.matches(in: value, range: NSRange(value.startIndex..., in: value)).compactMap { match in
+            guard let url = match.url,
+                  let scheme = url.scheme?.lowercased(),
+                  ["http", "https"].contains(scheme) else { return nil }
+            let link = url.absoluteString
+            return seen.insert(link).inserted ? link : nil
+        }
     }
 
     private static func cleanedURL(_ value: String) -> String? {

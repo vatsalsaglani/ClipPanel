@@ -15,6 +15,7 @@ struct SettingsRootView: View {
     @State private var autoPasteGranted = false
     @State private var accessibilityGranted = false
     @State private var requestedAutoPaste = false
+    @State private var maintenanceError: String?
 
     var body: some View {
         TabView(selection: $section) {
@@ -111,6 +112,10 @@ struct SettingsRootView: View {
                     NSWorkspace.shared.activateFileViewerSelecting([Bundle.main.bundleURL])
                 }
             }
+            if requestedAutoPaste || (!autoPasteGranted && accessibilityGranted) {
+                Button("Restart ClipPanel to Apply Permission") { restartClipPanel() }
+                if let maintenanceError { Text(maintenanceError).font(.caption).foregroundStyle(.secondary) }
+            }
             LabeledContent("Text caret placement", value: accessibilityGranted ? "Permission available" : "Optional Accessibility permission")
             Button("Request Accessibility Permission") {
                 appState.onRequestAccessibility?()
@@ -137,9 +142,31 @@ struct SettingsRootView: View {
             Text("History stays on this Mac. Optional folder sync is explicit and encrypted; ClipPanel does not use analytics or a cloud account.").foregroundStyle(.secondary)
         }.formStyle(.grouped)
     }
+    private func restartClipPanel() {
+        do {
+            try AppMaintenanceService.restart()
+        } catch {
+            maintenanceError = "ClipPanel could not restart. Quit it from the menu bar and reopen this copy."
+        }
+    }
+
     private var about: some View {
         Form {
-            LabeledContent("Version", value: "1.0")
+            LabeledContent("Version", value: AppMaintenanceService.versionDescription())
+            Button("Check for Updates…") {
+                if !AppMaintenanceService.openReleases() {
+                    maintenanceError = "The releases page could not be opened. Try again after setting a default browser."
+                }
+            }
+            Text("Opens the beta releases page in your browser. ClipPanel does not check for updates in the background.")
+                .font(.caption).foregroundStyle(.secondary)
+            Text("To update: download the latest beta, quit ClipPanel, replace the app in Applications, and reopen it. If auto-paste needs approval, allow the updated app in macOS Settings and restart ClipPanel.")
+                .font(.caption).foregroundStyle(.secondary)
+            Button("Show This ClipPanel in Finder") {
+                NSWorkspace.shared.activateFileViewerSelecting([Bundle.main.bundleURL])
+            }
+            Button("Restart ClipPanel") { restartClipPanel() }
+            if let maintenanceError { Text(maintenanceError).font(.caption).foregroundStyle(.secondary) }
             Text("ClipPanel is a local-only clipboard history utility.")
             Text("Third-party acknowledgement: KeyboardShortcuts by Sindre Sorhus.").foregroundStyle(.secondary)
             Button("Open Application Support Folder") { appState.onOpenDataFolder?() }
