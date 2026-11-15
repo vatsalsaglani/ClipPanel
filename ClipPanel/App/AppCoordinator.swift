@@ -99,7 +99,12 @@ final class AppCoordinator {
         appState.onOpenDataFolder = { [weak self] in self?.openDataFolder() }
         appState.onResetSettings = { [weak self] in self?.resetSettings() }
         ClipPanelAutomationRouter.shared.onRoute = { [weak self] route in self?.handleAutomationRoute(route) }
-        panelState.onQueryChanged = { [weak self] query in self?.refreshPanelResults(query: query) }
+        // The panel searches its prepared value snapshot as the user types. Fetching history
+        // here would decode image/file payloads and rebuild normalized fields every key.
+        panelState.previewProvider = { [weak self] id in
+            guard let self, let record = try? self.clipboardStore.record(id: id) else { return nil }
+            return try? self.clipboardStore.payload(for: record)
+        }
         panelState.onIntent = { [weak self] intent in self?.handlePanelIntent(intent) }
     }
 
