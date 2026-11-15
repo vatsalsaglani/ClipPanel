@@ -9,17 +9,24 @@ final class ClipboardPanelController: NSObject {
     private let panelDensityProvider: () -> PanelDensity
     private let keepSearchQueryProvider: () -> Bool
     private let caretPointProvider: () -> CGPoint?
+    private let onWillPresent: () -> Void
     private var panel: ClipboardPanel?
     private var keyMonitor: Any?
     private var previousApplication: NSRunningApplication?
+    private var feedbackPanel: NSPanel?
+    private var feedbackTask: Task<Void, Never>?
+    private var standardPanelHeight: CGFloat = 480
 
-    init(state: ClipboardPanelState, recordsProvider: @escaping () -> [ClipboardSearchItem], panelAnchorProvider: @escaping () -> PanelAnchor, panelDensityProvider: @escaping () -> PanelDensity, keepSearchQueryProvider: @escaping () -> Bool, caretPointProvider: @escaping () -> CGPoint?) {
+    init(state: ClipboardPanelState, recordsProvider: @escaping () -> [ClipboardSearchItem], panelAnchorProvider: @escaping () -> PanelAnchor, panelDensityProvider: @escaping () -> PanelDensity, keepSearchQueryProvider: @escaping () -> Bool, caretPointProvider: @escaping () -> CGPoint?, onWillPresent: @escaping () -> Void = {}) {
         self.state = state
         self.recordsProvider = recordsProvider
         self.panelAnchorProvider = panelAnchorProvider
         self.panelDensityProvider = panelDensityProvider
         self.keepSearchQueryProvider = keepSearchQueryProvider
         self.caretPointProvider = caretPointProvider
+        self.onWillPresent = onWillPresent
+        super.init()
+        state.onPreviewVisibilityChanged = { [weak self] in self?.resizeForPreview() }
     }
 
     func toggle() {
@@ -33,6 +40,7 @@ final class ClipboardPanelController: NSObject {
     }
 
     private func present(query: String) {
+        onWillPresent()
         if let application = NSWorkspace.shared.frontmostApplication, application.bundleIdentifier != Bundle.main.bundleIdentifier {
             previousApplication = application
         }
@@ -44,6 +52,7 @@ final class ClipboardPanelController: NSObject {
 
     func dismiss() {
         panel?.orderOut(nil)
+        state.closePreview()
         removeKeyMonitor()
         state.statusMessage = nil
     }
@@ -53,7 +62,9 @@ final class ClipboardPanelController: NSObject {
     private func showPanel() {
         let panel = makePanelIfNeeded()
         panel.contentView = NSHostingView(rootView: ClipboardPanelView(state: state, density: panelDensityProvider()))
-        let desiredSize = CGSize(width: 560, height: state.results.isEmpty ? 190 : min(440, 132 + CGFloat(state.results.count) * 58))
+        feedbackPanel?.orderOut(nil)
+        let desiredSize = CGSize(width: 560, height: state.results.isEmpty ? 240 : min(480, 190 + CGFloat(state.results.count) * 58))
+        standardPanelHeight = desiredSize.height
         let geometries = NSScreen.screens.map { ScreenGeometry(frame: $0.frame, visibleFrame: $0.visibleFrame) }
         let anchor = panelAnchorProvider()
         let point = anchor == .textCaret ? (caretPointProvider() ?? NSEvent.mouseLocation) : NSEvent.mouseLocation
@@ -63,6 +74,44 @@ final class ClipboardPanelController: NSObject {
         // destination app. Ordering it out returns focus to that app’s input.
         installKeyMonitor()
         state.focusGeneration += 1
+    }
+
+    /// A copy fallback must be visible without taking the destination app's keyboard focus.
+    func showPasteFeedback(message: String) {
+        feedbackTask?.cancel()
+        let feedback = feedbackPanel ?? NSPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        feedback.level = .floating
+        feedback.isOpaque = false
+        feedback.backgroundColor = .clear
+        feedback.hasShadow = true
+        feedback.collectionBehavior = [.transient, .fullScreenAuxiliary, .moveToActiveSpace]
+        feedback.contentView = NSHostingView(rootView:
+            Label(message, systemImage: "doc.on.clipboard")
+                .font(.callout)
+                .padding(16)
+                .frame(maxWidth: .infinity)
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+                .accessibilityLabel(message)
+        )
+        let screens = NSScreen.screens.map { ScreenGeometry(frame: $0.frame, visibleFrame: $0.visibleFrame) }
+        feedback.setFrame(PanelPositioner.frame(panelSize: CGSize(width: 430, height: 72), pointer: NSEvent.mouseLocation, screens: screens, anchor: .screenCenter), display: true)
+        feedback.orderFrontRegardless()
+        feedbackPanel = feedback
+        feedbackTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(5))
+            guard !Task.isCancelled else { return }
+            self?.feedbackPanel?.orderOut(nil)
+        }
+    }
+
+    private func resizeForPreview() {
+        guard let panel, panel.isVisible else { return }
+        guard let visible = panel.screen?.visibleFrame ?? NSScreen.main?.visibleFrame else { return }
+        let height = min(standardPanelHeight + (state.isPreviewVisible ? 231 : 0), visible.height)
+        var frame = panel.frame
+        frame.origin.y = min(max(frame.maxY - height, visible.minY), visible.maxY - height)
+        frame.size.height = height
+        panel.setFrame(frame, display: true)
     }
 
     private func makePanelIfNeeded() -> ClipboardPanel {
@@ -83,11 +132,23 @@ final class ClipboardPanelController: NSObject {
         removeKeyMonitor()
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self, self.panel?.isVisible == true else { return event }
-            let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            let flags = event.modifierFlags.intersection([.command, .option, .control, .shift])
+            if flags == .command, let characters = event.charactersIgnoringModifiers,
+               let number = Int(characters), (1...9).contains(number) {
+                _ = self.state.pasteResult(number: number)
+                return nil
+            }
             switch event.keyCode {
             case 126: self.state.moveSelection(by: -1); return nil
             case 125: self.state.moveSelection(by: 1); return nil
-            case 53: self.state.send(.dismiss); return nil
+            case 53:
+                if self.state.isPreviewVisible { self.state.closePreview() }
+                else { self.state.send(.dismiss) }
+                return nil
+            case 49 where flags.isEmpty && self.state.resultsHaveKeyboardFocus:
+                self.state.togglePreview(); return nil
+            case 16 where flags == .command:
+                self.state.togglePreview(); return nil
             case 36, 76:
                 AppLogger.panel.notice("Paste key received")
                 if flags.contains(.option) { self.state.send(.copyOnly) }
@@ -96,7 +157,12 @@ final class ClipboardPanelController: NSObject {
                 return nil
             case 35 where flags.contains(.command): self.state.send(.togglePin); return nil
             case 43 where flags.contains(.command): self.state.send(.openSettings); return nil
-            default: return event
+            default:
+                if !flags.contains(.command), !flags.contains(.control),
+                   event.characters?.contains(where: { !$0.isWhitespace }) == true {
+                    self.state.resultsHaveKeyboardFocus = false
+                }
+                return event
             }
         }
     }

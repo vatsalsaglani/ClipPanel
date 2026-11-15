@@ -36,36 +36,52 @@ struct ClipboardSearchItem: Identifiable, Equatable, Sendable {
 
 enum SearchEngine {
     static func search(_ query: String, in items: [ClipboardSearchItem]) -> [ClipboardSearchItem] {
-        let parsed = SearchQuery(query)
-        guard parsed.hasCriteria else {
-            return items.sorted {
-                if $0.isPinned != $1.isPinned { return $0.isPinned }
-                return $0.lastCopiedAt > $1.lastCopiedAt
-            }
-        }
-        let searchTerms = parsed.tokens.map(SearchTerm.init)
-        let matches: [(ClipboardSearchItem, Int)] = items.compactMap { item in
-            guard parsed.matchesFilters(item) else { return nil }
-            if let expression = parsed.regularExpression {
-                let haystack = normalize([item.displayText, item.searchText, item.sourceApplicationName, item.kind.displayName, item.tagNames.joined(separator: " "), item.collectionNames.joined(separator: " ")].compactMap { $0 }.joined(separator: " "))
-                if expression.firstMatch(in: haystack, range: NSRange(haystack.startIndex..., in: haystack)) == nil { return nil }
-            }
-            guard !searchTerms.isEmpty else { return (item, 0) }
+        guard SearchQuery(query).hasCriteria else { return items.sorted(by: precedes) }
+        return Index(items: items).search(query)
+    }
 
-            let fields = NormalizedSearchFields(item)
-            var totalScore = 0
-            for term in searchTerms {
-                guard let score = score(term: term, in: fields) else { return nil }
-                totalScore += score
+    /// Builds normalized fields once per history snapshot, never once per keystroke.
+    struct Index {
+        private let entries: [(item: ClipboardSearchItem, fields: NormalizedSearchFields)]
+
+        init(items: [ClipboardSearchItem]) {
+            entries = items.sorted(by: SearchEngine.precedes).map { ($0, NormalizedSearchFields($0)) }
+        }
+
+        func search(_ query: String, filter: ClipboardTypeFilter = .all) -> [ClipboardSearchItem] {
+            let parsed = SearchQuery(query)
+            guard parsed.hasCriteria else { return entries.compactMap { filter.matches($0.item.kind) ? $0.item : nil } }
+            let searchTerms = parsed.tokens.map(SearchTerm.init)
+            let matches: [(ClipboardSearchItem, Int)] = entries.compactMap { entry in
+                let item = entry.item
+                guard filter.matches(item.kind) else { return nil }
+                guard parsed.matchesFilters(item) else { return nil }
+                if let expression = parsed.regularExpression {
+                    let haystack = entry.fields.regexText
+                    if expression.firstMatch(in: haystack, range: NSRange(haystack.startIndex..., in: haystack)) == nil { return nil }
+                }
+                guard !searchTerms.isEmpty else { return (item, 0) }
+
+                let fields = entry.fields
+                var totalScore = 0
+                for term in searchTerms {
+                    guard let score = score(term: term, in: fields) else { return nil }
+                    totalScore += score
+                }
+                return (item, totalScore)
             }
-            return (item, totalScore)
+            return matches.sorted {
+                if $0.1 != $1.1 { return $0.1 > $1.1 }
+                return SearchEngine.precedes($0.0, $1.0)
+            }
+            .map(\.0)
         }
-        return matches.sorted {
-            if $0.1 != $1.1 { return $0.1 > $1.1 }
-            if $0.0.isPinned != $1.0.isPinned { return $0.0.isPinned }
-            return $0.0.lastCopiedAt > $1.0.lastCopiedAt
-        }
-        .map(\.0)
+    }
+
+    private static func precedes(_ lhs: ClipboardSearchItem, _ rhs: ClipboardSearchItem) -> Bool {
+        if lhs.isPinned != rhs.isPinned { return lhs.isPinned }
+        if lhs.lastCopiedAt != rhs.lastCopiedAt { return lhs.lastCopiedAt > rhs.lastCopiedAt }
+        return lhs.id.uuidString < rhs.id.uuidString
     }
 
     static func normalize(_ value: String) -> String {
@@ -75,10 +91,46 @@ enum SearchEngine {
     }
 
     static func displayMatchRanges(query: String, in value: String) -> [Range<String.Index>] {
-        let tokens = normalize(query).split(separator: " ").map(String.init)
+        let tokens = SearchQuery(query).tokens
         guard !tokens.isEmpty else { return [] }
-        return tokens.compactMap { token in
-            value.range(of: token, options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+        // Keep original character boundaries while matching folded text (including expanded
+        // ligatures and diacritics). Filter syntax is deliberately never highlighted.
+        var folded: [Character] = []
+        var original: [Range<String.Index>] = []
+        for index in value.indices {
+            let range = index..<value.index(after: index)
+            for character in String(value[range]).folding(options: [.caseInsensitive, .diacriticInsensitive, .widthInsensitive], locale: .current) {
+                folded.append(character)
+                original.append(range)
+            }
+        }
+        var matched = Set<Int>()
+        for token in tokens {
+            let needle = Array(token)
+            guard !needle.isEmpty, needle.count <= folded.count else { continue }
+            var contiguous = false
+            for start in 0...(folded.count - needle.count) {
+                if folded[start..<(start + needle.count)].elementsEqual(needle) {
+                    matched.formUnion(start..<(start + needle.count))
+                    contiguous = true
+                }
+            }
+            if !contiguous {
+                var positions: [Int] = []
+                var next = 0
+                for character in needle {
+                    guard let found = folded[next...].firstIndex(of: character) else { positions = []; break }
+                    positions.append(found)
+                    next = found + 1
+                }
+                matched.formUnion(positions)
+            }
+        }
+        let ranges = matched.sorted().map { original[$0] }
+        return ranges.reduce(into: []) { result, range in
+            if let last = result.last, last.upperBound >= range.lowerBound {
+                result[result.count - 1] = last.lowerBound..<max(last.upperBound, range.upperBound)
+            } else { result.append(range) }
         }
     }
 
@@ -109,16 +161,20 @@ enum SearchEngine {
         guard !value.isEmpty else { return nil }
         if term.wordBoundaryExpression.firstMatch(in: value, range: NSRange(value.startIndex..., in: value)) != nil { return 650 }
         if value.contains(term.value) { return 450 }
-        return isSubsequence(term.value, of: value) ? 100 : nil
+        return fuzzyScore(term.value, in: value)
     }
 
-    private static func isSubsequence(_ needle: String, of haystack: String) -> Bool {
+    /// Compact subsequences rank ahead of scattered letters. Never allow fuzzy matches
+    /// to outrank a substring, and reject no characters merely because of a typo gap.
+    private static func fuzzyScore(_ needle: String, in haystack: String) -> Int? {
         var start = haystack.startIndex
+        var gaps = 0
         for expected in needle {
-            guard let found = haystack[start...].firstIndex(of: expected) else { return false }
+            guard let found = haystack[start...].firstIndex(of: expected) else { return nil }
+            gaps += haystack.distance(from: start, to: found)
             start = haystack.index(after: found)
         }
-        return true
+        return max(10, 150 - min(gaps, 140))
     }
 
     private struct SearchTerm {
@@ -131,12 +187,14 @@ enum SearchEngine {
         }
     }
 
-    private struct NormalizedSearchFields {
+    fileprivate struct NormalizedSearchFields {
         let title: String
         let content: String?
         let source: String
         let tags: String
         let collections: String
+        let kindName: String
+        var regexText: String { [title, content ?? "", source, kindName, tags, collections].joined(separator: " ") }
 
         init(_ item: ClipboardSearchItem) {
             title = SearchEngine.normalize(item.displayText)
@@ -149,6 +207,7 @@ enum SearchEngine {
             source = item.sourceApplicationName.map(SearchEngine.normalize) ?? ""
             tags = item.tagNames.isEmpty ? "" : SearchEngine.normalize(item.tagNames.joined(separator: " "))
             collections = item.collectionNames.isEmpty ? "" : SearchEngine.normalize(item.collectionNames.joined(separator: " "))
+            kindName = item.kind.displayName.lowercased()
         }
     }
 }
@@ -227,6 +286,25 @@ enum DateFilter: String, Sendable {
         case .today: return calendar.isDateInToday(date)
         case .yesterday: return calendar.isDateInYesterday(date)
         case .week: return date >= calendar.date(byAdding: .day, value: -7, to: now)!
+        }
+    }
+}
+
+/// Text includes URLs and rich text; the query parser still supports exact `type:` filters.
+enum ClipboardTypeFilter: String, CaseIterable, Identifiable {
+    case all = "All"
+    case text = "Text"
+    case images = "Images"
+    case files = "Files"
+
+    var id: String { rawValue }
+
+    func matches(_ kind: ClipboardKind) -> Bool {
+        switch self {
+        case .all: true
+        case .text: [.text, .richText, .url].contains(kind)
+        case .images: kind == .image
+        case .files: kind == .files
         }
     }
 }

@@ -5,6 +5,7 @@ struct ClipboardRowView: View {
     let item: ClipboardSearchItem
     let query: String
     let density: PanelDensity
+    var shortcutNumber: Int? = nil
 
     var body: some View {
         HStack(spacing: 10) {
@@ -40,6 +41,12 @@ struct ClipboardRowView: View {
                 .foregroundStyle(.secondary)
             }
             Spacer(minLength: 0)
+            if let shortcutNumber {
+                Text("⌘\(shortcutNumber)")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .accessibilityLabel("Command \(shortcutNumber) to paste")
+            }
             if item.isPinned { Image(systemName: "pin.fill").font(.caption).accessibilityLabel("Pinned") }
         }
         .padding(.vertical, density == .compact ? 2 : 5)
@@ -48,7 +55,7 @@ struct ClipboardRowView: View {
     private var iconSize: CGFloat { density == .compact ? 22 : 28 }
 
     private var highlightedTitle: Text {
-        let value = item.displayText.isEmpty ? item.kind.displayName : item.displayText
+        let value = item.displayText.isEmpty ? item.kind.displayName : String(item.displayText.prefix(240))
         let ranges = SearchEngine.displayMatchRanges(query: query, in: value)
         var attributed = AttributedString(value)
         for range in ranges {
