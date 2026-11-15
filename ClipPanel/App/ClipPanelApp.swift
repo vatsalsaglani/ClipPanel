@@ -16,7 +16,7 @@ struct ClipPanelApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     init() {
-        ClipPanelShortcuts.updateAppShortcutParameters()
+        if !AppRuntime.isRunningTests { ClipPanelShortcuts.updateAppShortcutParameters() }
     }
 
     var body: some Scene {

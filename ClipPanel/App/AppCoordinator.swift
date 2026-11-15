@@ -30,24 +30,40 @@ final class AppCoordinator {
 
     init() {
         let container: ModelContainer
-        do {
-            container = try ModelContainer(
-                for: Schema(ClipboardSchemaV2.models),
-                migrationPlan: ClipboardMigrationPlan.self
-            )
-        } catch {
-            // P0 builds shipped an inferred, unversioned store. SwiftData cannot put that store
-            // directly into a staged migration chain, but it can perform the same additive
-            // lightweight migration when opening the current schema directly.
+        if AppRuntime.isRunningTests {
             do {
-                container = try ModelContainer(for: Schema(ClipboardSchemaV2.models))
+                container = try ModelContainer(
+                    for: Schema(ClipboardSchemaV2.models),
+                    configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+                )
             } catch {
-                fatalError("ClipPanel could not create local history storage: \(error.localizedDescription)")
+                fatalError("ClipPanel could not create the isolated test store.")
+            }
+        } else {
+            do {
+                container = try ModelContainer(
+                    for: Schema(ClipboardSchemaV2.models),
+                    migrationPlan: ClipboardMigrationPlan.self
+                )
+            } catch {
+                // P0 builds shipped an inferred, unversioned store. SwiftData cannot put that store
+                // directly into a staged migration chain, but it can perform the same additive
+                // lightweight migration when opening the current schema directly.
+                do {
+                    container = try ModelContainer(for: Schema(ClipboardSchemaV2.models))
+                } catch {
+                    fatalError("ClipPanel could not create local history storage: \(error.localizedDescription)")
+                }
             }
         }
         modelContainer = container
-        settings = SettingsStore()
-        clipboardStore = ClipboardStore(modelContext: ModelContext(modelContainer))
+        settings = SettingsStore(defaults: AppRuntime.isRunningTests
+            ? UserDefaults(suiteName: "ClipPanel.TestHost.\(UUID().uuidString)")!
+            : .standard)
+        clipboardStore = ClipboardStore(
+            modelContext: ModelContext(container),
+            vault: AppRuntime.isRunningTests ? try! EncryptedPayloadVault(keyData: Data(repeating: 0, count: 32)) : nil
+        )
         pasteboardMonitor = PasteboardMonitor(
             captureService: ClipboardCaptureService(),
             store: clipboardStore,
@@ -86,7 +102,7 @@ final class AppCoordinator {
     func start() {
         AppLogger.lifecycle.info("ClipPanel launched")
         AppLogger.permissions.notice("Auto-paste access granted: \(self.permissionService.autoPasteState == .granted); enabled: \(self.settings.autoPasteEnabled)")
-        guard ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil else {
+        guard !AppRuntime.isRunningTests else {
             AppLogger.lifecycle.debug("Skipping menu-bar services under XCTest")
             return
         }

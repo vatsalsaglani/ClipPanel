@@ -71,8 +71,8 @@ final class ClipboardPayloadTests: XCTestCase {
 
     func testDeduplicationUpdatesRecencyAndPreservesPin() async throws {
         let result = try await MainActor.run { () throws -> (Int, Bool, Date) in
-            let container = try ModelContainer(for: ClipboardRecord.self, configurations: ModelConfiguration(isStoredInMemoryOnly: true))
-            let store = ClipboardStore(modelContext: ModelContext(container))
+            let container = try ModelContainer(for: Schema(ClipboardSchemaV2.models), configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+            let store = ClipboardStore(modelContext: ModelContext(container), vault: try EncryptedPayloadVault(keyData: Data(repeating: 0, count: 32)))
             let candidate = candidate(text: "duplicate")
             let first = try store.upsert(candidate, historyLimit: 500, now: Date(timeIntervalSince1970: 1))
             try store.setPinned(first, isPinned: true)
@@ -87,8 +87,8 @@ final class ClipboardPayloadTests: XCTestCase {
 
     func testRetentionDoesNotDeletePinnedRecords() async throws {
         let result = try await MainActor.run { () throws -> (Int, Set<String>) in
-            let container = try ModelContainer(for: ClipboardRecord.self, configurations: ModelConfiguration(isStoredInMemoryOnly: true))
-            let store = ClipboardStore(modelContext: ModelContext(container))
+            let container = try ModelContainer(for: Schema(ClipboardSchemaV2.models), configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+            let store = ClipboardStore(modelContext: ModelContext(container), vault: try EncryptedPayloadVault(keyData: Data(repeating: 0, count: 32)))
             let pinned = try store.upsert(candidate(text: "pinned"), historyLimit: 2, now: Date(timeIntervalSince1970: 1))
             try store.setPinned(pinned, isPinned: true)
             _ = try store.upsert(candidate(text: "two"), historyLimit: 2, now: Date(timeIntervalSince1970: 2))
@@ -107,12 +107,12 @@ final class ClipboardPayloadTests: XCTestCase {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
             defer { try? FileManager.default.removeItem(at: directory) }
             let configuration = ModelConfiguration(url: directory.appendingPathComponent("history.store"))
-            let firstContainer = try ModelContainer(for: ClipboardRecord.self, configurations: configuration)
-            let firstStore = ClipboardStore(modelContext: ModelContext(firstContainer))
+            let firstContainer = try ModelContainer(for: Schema(ClipboardSchemaV2.models), configurations: configuration)
+            let firstStore = ClipboardStore(modelContext: ModelContext(firstContainer), vault: try EncryptedPayloadVault(keyData: Data(repeating: 0, count: 32)))
             _ = try firstStore.upsert(candidate(text: "persisted"), historyLimit: 500)
 
-            let secondContainer = try ModelContainer(for: ClipboardRecord.self, configurations: configuration)
-            let secondStore = ClipboardStore(modelContext: ModelContext(secondContainer))
+            let secondContainer = try ModelContainer(for: Schema(ClipboardSchemaV2.models), configurations: configuration)
+            let secondStore = ClipboardStore(modelContext: ModelContext(secondContainer), vault: try EncryptedPayloadVault(keyData: Data(repeating: 0, count: 32)))
             return try secondStore.records().count
         }
         XCTAssertEqual(count, 1)
@@ -125,15 +125,25 @@ final class ClipboardPayloadTests: XCTestCase {
             defer { try? FileManager.default.removeItem(at: directory) }
             let configuration = ModelConfiguration(url: directory.appendingPathComponent("history.store"))
             let v1 = try ModelContainer(for: Schema(ClipboardSchemaV1.models), configurations: configuration)
-            let v1Store = ClipboardStore(modelContext: ModelContext(v1))
-            _ = try v1Store.upsert(candidate(text: "before migration"), historyLimit: 500)
+            let v1Context = ModelContext(v1)
+            let legacy = candidate(text: "before migration")
+            v1Context.insert(ClipboardRecord(
+                kind: legacy.preview.kind,
+                displayText: legacy.preview.displayText,
+                searchText: legacy.preview.searchText,
+                contentHash: legacy.contentHash,
+                byteCount: legacy.payload.byteCount,
+                itemCount: legacy.payload.items.count,
+                payloadData: legacy.encodedPayload
+            ))
+            try v1Context.save()
 
             let v2 = try ModelContainer(
                 for: Schema(ClipboardSchemaV2.models),
                 migrationPlan: ClipboardMigrationPlan.self,
                 configurations: configuration
             )
-            return try ClipboardStore(modelContext: ModelContext(v2)).records().count
+            return try ClipboardStore(modelContext: ModelContext(v2), vault: try EncryptedPayloadVault(keyData: Data(repeating: 0, count: 32))).records().count
         }
         XCTAssertEqual(count, 1)
     }
