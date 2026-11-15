@@ -6,26 +6,32 @@ final class PasteboardMonitor {
     private let store: ClipboardStore
     private let settings: SettingsStore
     private let permissions: PermissionService
+    private let pasteboard: NSPasteboard
+    private let sourceProvider: @MainActor () -> SourceApplication?
+    private let clipboardAccessProvider: (@MainActor () -> ClipboardAccessState)?
     private var timer: Timer?
     private var observedChangeCount: Int
 
-    init(captureService: ClipboardCaptureService, store: ClipboardStore, settings: SettingsStore, permissions: PermissionService, pasteboard: NSPasteboard = .general) {
+    init(captureService: ClipboardCaptureService, store: ClipboardStore, settings: SettingsStore, permissions: PermissionService, pasteboard: NSPasteboard = .general, sourceProvider: (@MainActor () -> SourceApplication?)? = nil, clipboardAccessProvider: (@MainActor () -> ClipboardAccessState)? = nil) {
         self.captureService = captureService
         self.store = store
         self.settings = settings
         self.permissions = permissions
+        self.pasteboard = pasteboard
+        self.sourceProvider = sourceProvider ?? { SourceApplicationService.currentSource() }
+        self.clipboardAccessProvider = clipboardAccessProvider
         observedChangeCount = pasteboard.changeCount
     }
 
     func start() {
         guard timer == nil else { return }
-        observedChangeCount = NSPasteboard.general.changeCount
+        observedChangeCount = pasteboard.changeCount
         timer = Timer.scheduledTimer(timeInterval: 0.35, target: self, selector: #selector(pollTimerFired(_:)), userInfo: nil, repeats: true)
         RunLoop.main.add(timer!, forMode: .common)
     }
 
     func setMonitoringEnabled(_ enabled: Bool) {
-        observedChangeCount = NSPasteboard.general.changeCount
+        observedChangeCount = pasteboard.changeCount
         if enabled {
             start()
         } else {
@@ -46,21 +52,20 @@ final class PasteboardMonitor {
         poll()
     }
 
-    private func poll() {
+    func poll() {
         guard settings.monitoringEnabled else { return }
-        guard permissions.clipboardAccessState != .denied else {
+        guard (clipboardAccessProvider?() ?? permissions.clipboardAccessState) != .denied else {
             AppLogger.monitor.notice("Clipboard access is denied; monitor is inactive")
             return
         }
-        let pasteboard = NSPasteboard.general
         let changeCount = pasteboard.changeCount
         guard changeCount != observedChangeCount else { return }
         observedChangeCount = changeCount
-        let source = SourceApplicationService.currentSource()
+        let source = sourceProvider()
         switch captureService.capture(from: pasteboard, settings: settings, source: source) {
         case let .captured(candidate):
             do {
-                _ = try store.upsert(candidate, historyLimit: settings.historyLimit)
+                _ = try store.upsert(candidate, historyLimit: settings.historyLimit, maximumAgeDays: settings.historyMaximumAgeDays)
                 AppLogger.monitor.debug("Captured clipboard metadata")
             } catch {
                 AppLogger.persistence.error("Clipboard persistence failed")

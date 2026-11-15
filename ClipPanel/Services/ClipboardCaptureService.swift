@@ -33,6 +33,10 @@ struct ClipboardCaptureCandidate: Equatable {
 @MainActor
 final class ClipboardCaptureService {
     func capture(from pasteboard: NSPasteboard, settings: SettingsStore, source: SourceApplication?) -> ClipboardCaptureOutcome {
+        // Exclusions are evaluated before asking another app for any clipboard representation.
+        if let identifier = source?.bundleIdentifier, settings.ignoredBundleIdentifiers.contains(identifier) {
+            return .ignored(.ignoredApplication)
+        }
         let items = pasteboard.pasteboardItems ?? []
         let policy = ClipboardCaptureFilteringPolicy(
             ignoreTransient: settings.ignoreTransient,

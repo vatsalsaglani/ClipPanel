@@ -22,7 +22,7 @@ Pasteboard changeCount → PasteboardMonitor → ClipboardCaptureService
 
 ## Persistence behavior
 
-The record hash is based on canonical type ordering within each item while retaining item ordering/boundaries. A matching hash is verified against encoded payload data before dedupe updates recency. Automatic cleanup removes only excess unpinned records. Pin state survives re-copying.
+The record hash is based on canonical type ordering within each item while retaining item ordering/boundaries. A matching hash is verified against encoded payload data before dedupe updates recency. Automatic cleanup removes only excess disposable records and, when explicitly enabled, records older than the configured age since last copy. Pins, saved snippets, favorites, collection membership, and encrypted payloads are protected from both forms of automatic cleanup. Pin state survives re-copying.
 
 ## Privacy behavior
 

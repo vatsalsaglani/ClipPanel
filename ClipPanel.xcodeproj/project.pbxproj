@@ -44,8 +44,10 @@
 		A123E7EF1EA6CA6A06749CAD /* ClipboardPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03710C18B94E04E112BA4DC9 /* ClipboardPanel.swift */; };
 		A2AA335E995234F1405696F5 /* ClipPanelApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 175D50F41C62BA3E52530B6E /* ClipPanelApp.swift */; };
 		A356262DC766EBF1B3956502 /* CustomTextCommandStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = CBC57D7B11ABCB397E8F5605 /* CustomTextCommandStore.swift */; };
+		AA6ED7CB771C6D0E5236EFF9 /* PrivacyHistoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 194F5B0D67E534448524ED34 /* PrivacyHistoryTests.swift */; };
 		AB3C2DD2CB4F98550BF12DF2 /* ClipboardRecord.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3D8880CF973E6F49FF62B1C /* ClipboardRecord.swift */; };
 		AF5051C0801114761FA76EA3 /* ClipboardTransformationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C70ACF344FC0330CC2083C9 /* ClipboardTransformationService.swift */; };
+		B2E88040FC93BD0F2CE90B18 /* PrivacyHistorySettingsViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 275D526DB25D379BF7897862 /* PrivacyHistorySettingsViews.swift */; };
 		B5FB5468C11D67E006945D04 /* ClipboardPayloadTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB656C14B8A4A27C0B1B2758 /* ClipboardPayloadTests.swift */; };
 		BFEC502AA59B53BED42CE9F9 /* EmptyStateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A14E13B89580E70C5058B980 /* EmptyStateView.swift */; };
 		C3132AF2A384C597FC6943A2 /* SearchAndGeometryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E3B3E21CF47D02BA9CEE8E2 /* SearchAndGeometryTests.swift */; };
@@ -90,9 +92,11 @@
 		0AE775677B6D40E2B4D1551F /* PreviewBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreviewBuilder.swift; sourceTree = "<group>"; };
 		175D50F41C62BA3E52530B6E /* ClipPanelApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipPanelApp.swift; sourceTree = "<group>"; };
 		19288C60BAEE065158FFA945 /* ClipboardPayload.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipboardPayload.swift; sourceTree = "<group>"; };
+		194F5B0D67E534448524ED34 /* PrivacyHistoryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrivacyHistoryTests.swift; sourceTree = "<group>"; };
 		1B679BD08D71E80CDEBC6BE2 /* ClipPanelIntents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipPanelIntents.swift; sourceTree = "<group>"; };
 		20CEC63A96F60FC5D0C318EC /* PersistenceSchema.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistenceSchema.swift; sourceTree = "<group>"; };
 		2602C7D068970660E1B3613F /* ClipArchiveService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipArchiveService.swift; sourceTree = "<group>"; };
+		275D526DB25D379BF7897862 /* PrivacyHistorySettingsViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrivacyHistorySettingsViews.swift; sourceTree = "<group>"; };
 		29A92E65FCD192EA23B9A1A1 /* PasteboardMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PasteboardMonitor.swift; sourceTree = "<group>"; };
 		2E6C1A49FB8362723B91095E /* AppCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppCoordinator.swift; sourceTree = "<group>"; };
 		2FB36A403552D42B565C7946 /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
@@ -171,6 +175,7 @@
 		26009C2DA4CE72940143EEFA /* Settings */ = {
 			isa = PBXGroup;
 			children = (
+				275D526DB25D379BF7897862 /* PrivacyHistorySettingsViews.swift */,
 				E83D325EF3313067D9138393 /* SettingsPlaceholderView.swift */,
 			);
 			path = Settings;
@@ -197,6 +202,7 @@
 				BB656C14B8A4A27C0B1B2758 /* ClipboardPayloadTests.swift */,
 				5D87EF4BA04D81AC0E36A9D7 /* ClipboardTransformationTests.swift */,
 				3EAE598AE84E9C2341AA6892 /* PasteServiceTests.swift */,
+				194F5B0D67E534448524ED34 /* PrivacyHistoryTests.swift */,
 				8E3B3E21CF47D02BA9CEE8E2 /* SearchAndGeometryTests.swift */,
 			);
 			path = ClipPanelTests;
@@ -527,6 +533,7 @@
 				5DF0E329A02CC1F0598C37EB /* PermissionState.swift in Sources */,
 				D10481CBA1CD67CC1C7FF9E3 /* PersistenceSchema.swift in Sources */,
 				381812C9DC88BD49EBF67885 /* PreviewBuilder.swift in Sources */,
+				B2E88040FC93BD0F2CE90B18 /* PrivacyHistorySettingsViews.swift in Sources */,
 				1D1D5D648E52303F884CB8E7 /* RelativeTimeFormatter.swift in Sources */,
 				9A5A8ED569A92442AA265253 /* SearchEngine.swift in Sources */,
 				20CF1B89F38ADCCFE49E8FCE /* SettingsPlaceholderView.swift in Sources */,
@@ -542,6 +549,7 @@
 				B5FB5468C11D67E006945D04 /* ClipboardPayloadTests.swift in Sources */,
 				D65B9524CE0AEE0354E2F946 /* ClipboardTransformationTests.swift in Sources */,
 				D3183C56E3859207B6C6E050 /* PasteServiceTests.swift in Sources */,
+				AA6ED7CB771C6D0E5236EFF9 /* PrivacyHistoryTests.swift in Sources */,
 				C3132AF2A384C597FC6943A2 /* SearchAndGeometryTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

@@ -15,6 +15,20 @@ enum PanelAnchor: String, CaseIterable, Sendable {
     }
 }
 
+enum MonitoringPauseDuration: TimeInterval, CaseIterable {
+    case fifteenMinutes = 900
+    case oneHour = 3600
+    case fourHours = 14400
+
+    var title: String {
+        switch self {
+        case .fifteenMinutes: "15 Minutes"
+        case .oneHour: "1 Hour"
+        case .fourHours: "4 Hours"
+        }
+    }
+}
+
 struct SettingsValidation: Sendable {
     static let historyRange = 1...10_000
     static let payloadRange = 1_024...(200 * 1_024 * 1_024)
@@ -30,6 +44,8 @@ struct SettingsValidation: Sendable {
 final class SettingsStore {
     private enum Key {
         static let monitoringEnabled = "monitoringEnabled"
+        static let monitoringPausedUntil = "monitoringPausedUntil"
+        static let historyMaximumAgeDays = "historyMaximumAgeDays"
         static let historyLimit = "historyLimit"
         static let maximumPayloadBytes = "maximumPayloadBytes"
         static let autoPasteEnabled = "autoPasteEnabled"
@@ -49,13 +65,31 @@ final class SettingsStore {
     }
 
     private let defaults: UserDefaults
+    private var resumeTimer: Timer?
     var monitoringEnabled: Bool {
         didSet {
+            if monitoringPausedUntil != nil { monitoringPausedUntil = nil }
             defaults.set(monitoringEnabled, forKey: Key.monitoringEnabled)
             onMonitoringChanged?(monitoringEnabled)
         }
     }
-    var historyLimit: Int { didSet { historyLimit = SettingsValidation.historyLimit(historyLimit); defaults.set(historyLimit, forKey: Key.historyLimit) } }
+    private(set) var monitoringPausedUntil: Date? {
+        didSet {
+            if let monitoringPausedUntil { defaults.set(monitoringPausedUntil, forKey: Key.monitoringPausedUntil) }
+            else { defaults.removeObject(forKey: Key.monitoringPausedUntil) }
+            scheduleAutomaticResume()
+            onMonitoringChanged?(monitoringEnabled)
+        }
+    }
+    /// Zero disables age expiry. Pinned and deliberately saved library items never expire.
+    var historyMaximumAgeDays: Int {
+        didSet {
+            historyMaximumAgeDays = min(max(historyMaximumAgeDays, 0), 3650)
+            defaults.set(historyMaximumAgeDays, forKey: Key.historyMaximumAgeDays)
+            onRetentionChanged?()
+        }
+    }
+    var historyLimit: Int { didSet { historyLimit = SettingsValidation.historyLimit(historyLimit); defaults.set(historyLimit, forKey: Key.historyLimit); onRetentionChanged?() } }
     var maximumPayloadBytes: Int { didSet { maximumPayloadBytes = SettingsValidation.maximumPayloadBytes(maximumPayloadBytes); defaults.set(maximumPayloadBytes, forKey: Key.maximumPayloadBytes) } }
     var autoPasteEnabled: Bool { didSet { defaults.set(autoPasteEnabled, forKey: Key.autoPasteEnabled) } }
     var copyOnlyFallbackEnabled: Bool { didSet { defaults.set(copyOnlyFallbackEnabled, forKey: Key.copyOnlyFallbackEnabled) } }
@@ -72,11 +106,15 @@ final class SettingsStore {
     var keepSearchQuery: Bool { didSet { defaults.set(keepSearchQuery, forKey: Key.keepSearchQuery) } }
     var showDockIcon: Bool { didSet { defaults.set(showDockIcon, forKey: Key.showDockIcon); onDockIconVisibilityChanged?(showDockIcon) } }
     var onMonitoringChanged: ((Bool) -> Void)?
+    var onRetentionChanged: (() -> Void)?
     var onDockIconVisibilityChanged: ((Bool) -> Void)?
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
+        let savedPause = defaults.object(forKey: Key.monitoringPausedUntil) as? Date
+        monitoringPausedUntil = savedPause
         monitoringEnabled = defaults.object(forKey: Key.monitoringEnabled) as? Bool ?? false
+        historyMaximumAgeDays = min(max(defaults.object(forKey: Key.historyMaximumAgeDays) as? Int ?? 0, 0), 3650)
         historyLimit = SettingsValidation.historyLimit(defaults.object(forKey: Key.historyLimit) as? Int ?? 500)
         maximumPayloadBytes = SettingsValidation.maximumPayloadBytes(defaults.object(forKey: Key.maximumPayloadBytes) as? Int ?? 20 * 1_024 * 1_024)
         autoPasteEnabled = defaults.object(forKey: Key.autoPasteEnabled) as? Bool ?? true
@@ -93,6 +131,42 @@ final class SettingsStore {
         panelDensity = PanelDensity(rawValue: defaults.string(forKey: Key.panelDensity) ?? "") ?? .comfortable
         keepSearchQuery = defaults.object(forKey: Key.keepSearchQuery) as? Bool ?? false
         showDockIcon = defaults.object(forKey: Key.showDockIcon) as? Bool ?? false
+        if let savedPause {
+            // A timed pause survives relaunch. A deadline passed while closed resumes on launch.
+            if savedPause <= .now { resumeMonitoring() }
+            else { monitoringEnabled = false; monitoringPausedUntil = savedPause }
+        }
+        scheduleAutomaticResume()
+    }
+
+    func pauseMonitoring(for duration: MonitoringPauseDuration, now: Date = .now) {
+        guard monitoringEnabled || monitoringPausedUntil != nil else { return }
+        monitoringEnabled = false
+        monitoringPausedUntil = now.addingTimeInterval(duration.rawValue)
+    }
+
+    func resumeMonitoring() {
+        monitoringEnabled = true
+    }
+
+    /// Called on wake as well as by the deadline timer, so sleep never extends a pause.
+    func resumeMonitoringIfNeeded(now: Date = .now) {
+        guard let deadline = monitoringPausedUntil, deadline <= now else { return }
+        resumeMonitoring()
+    }
+
+    private func scheduleAutomaticResume() {
+        resumeTimer?.invalidate()
+        resumeTimer = nil
+        guard let deadline = monitoringPausedUntil else { return }
+        let timer = Timer(fire: deadline, interval: 0, repeats: false) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.resumeMonitoringIfNeeded()
+                self?.scheduleAutomaticResume()
+            }
+        }
+        resumeTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
     }
 
     func reset() {
@@ -101,9 +175,10 @@ final class SettingsStore {
             Key.copyOnlyFallbackEnabled, Key.pasteDelay, Key.ignoreTransient, Key.ignoreConcealed,
             Key.ignoreAutoGenerated, Key.ignoredBundleIdentifiers, Key.onboardingCompleted,
             Key.launchAtLogin, Key.includeUniversalClipboard, Key.panelAnchor, Key.panelDensity,
-            Key.keepSearchQuery, Key.showDockIcon
+            Key.keepSearchQuery, Key.showDockIcon, Key.monitoringPausedUntil, Key.historyMaximumAgeDays
         ].forEach(defaults.removeObject(forKey:))
         monitoringEnabled = false
+        historyMaximumAgeDays = 0
         historyLimit = 500
         maximumPayloadBytes = 20 * 1_024 * 1_024
         autoPasteEnabled = true

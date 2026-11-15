@@ -16,6 +16,8 @@ final class AppCoordinator {
     private let launchAtLoginService = LaunchAtLoginService()
     private let onboardingController = OnboardingPanelController()
     private let libraryController = LibraryWindowController()
+    private var historyMaintenanceTimer: Timer?
+    private var wakeObserver: NSObjectProtocol?
     private lazy var panelController = ClipboardPanelController(
         state: panelState,
         recordsProvider: { [weak self] in
@@ -77,16 +79,18 @@ final class AppCoordinator {
                 return try clipboardStore.payload(for: record)
             }
         )
-        appState.isMonitoring = settings.monitoringEnabled
+        updateMonitoringStatus()
         settings.onMonitoringChanged = { [weak self] enabled in
             self?.pasteboardMonitor.setMonitoringEnabled(enabled)
-            self?.appState.isMonitoring = enabled
+            self?.updateMonitoringStatus()
         }
+        settings.onRetentionChanged = { [weak self] in self?.maintainHistory() }
         settings.onDockIconVisibilityChanged = { visible in
             NSApp.setActivationPolicy(visible ? .regular : .accessory)
         }
         appState.onShowClipboard = { [weak self] in self?.showClipboard() }
         appState.onShowLibrary = { [weak self] in self?.showLibrary() }
+        appState.onPauseMonitoring = { [weak self] duration in self?.settings.pauseMonitoring(for: duration) }
         appState.onToggleMonitoring = { [weak self] in self?.toggleMonitoring() }
         appState.onClearUnpinned = { [weak self] in self?.clearUnpinnedHistory() }
         appState.onClearAll = { [weak self] in self?.clearAllHistory() }
@@ -106,6 +110,17 @@ final class AppCoordinator {
             AppLogger.lifecycle.debug("Skipping menu-bar services under XCTest")
             return
         }
+        settings.resumeMonitoringIfNeeded()
+        maintainHistory()
+        historyMaintenanceTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in self?.maintainHistory() }
+        }
+        wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.settings.resumeMonitoringIfNeeded()
+                self?.maintainHistory()
+            }
+        }
         if settings.monitoringEnabled { pasteboardMonitor.start() }
         shortcutService.register { [weak self] in self?.showClipboard() }
         if settings.launchAtLogin { try? launchAtLoginService.setEnabled(true) }
@@ -121,6 +136,10 @@ final class AppCoordinator {
 
     func stop() {
         pasteboardMonitor.stop()
+        historyMaintenanceTimer?.invalidate()
+        historyMaintenanceTimer = nil
+        if let wakeObserver { NSWorkspace.shared.notificationCenter.removeObserver(wakeObserver) }
+        wakeObserver = nil
         AppLogger.lifecycle.info("ClipPanel terminating")
     }
 
@@ -140,7 +159,25 @@ final class AppCoordinator {
 
     private func toggleMonitoring() {
         settings.monitoringEnabled.toggle()
-        appState.statusMessage = settings.monitoringEnabled ? "Monitoring clipboard history" : "Monitoring paused"
+    }
+
+    private func updateMonitoringStatus() {
+        appState.isMonitoring = settings.monitoringEnabled
+        appState.monitoringPausedUntil = settings.monitoringPausedUntil
+        if let deadline = settings.monitoringPausedUntil {
+            appState.statusMessage = "Monitoring paused until \(deadline.formatted(date: .omitted, time: .shortened))"
+        } else {
+            appState.statusMessage = settings.monitoringEnabled ? "Monitoring clipboard history" : "Monitoring paused"
+        }
+    }
+
+    private func maintainHistory() {
+        do {
+            let removed = try clipboardStore.enforceRetention(limit: settings.historyLimit, maximumAgeDays: settings.historyMaximumAgeDays)
+            if removed > 0 { refreshPanelResults(query: panelState.query) }
+        } catch {
+            AppLogger.persistence.error("History retention cleanup failed")
+        }
     }
 
     private func clearUnpinnedHistory() {
