@@ -159,8 +159,24 @@ enum SearchEngine {
         if value == term.value { return 1_000 }
         if value.hasPrefix(term.value) { return 800 }
         guard !value.isEmpty else { return nil }
-        if term.wordBoundaryExpression.firstMatch(in: value, range: NSRange(value.startIndex..., in: value)) != nil { return 650 }
-        if value.contains(term.value) { return 450 }
+        if value.contains(term.value) {
+            if term.wordBoundaryExpression.firstMatch(in: value, range: NSRange(value.startIndex..., in: value)) != nil { return 650 }
+            return 450
+        }
+        if let needle = term.asciiBytes {
+            // Most clipboard searches are ASCII. Avoid repeated grapheme-index
+            // traversal for the common no-match path across long clip bodies.
+            var matched = 0
+            var gaps = 0
+            for byte in value.utf8 {
+                guard byte < 128 else { return fuzzyScore(term.value, in: value) }
+                if byte == needle[matched] {
+                    matched += 1
+                    if matched == needle.count { return max(10, 150 - min(gaps, 140)) }
+                } else { gaps += 1 }
+            }
+            return nil
+        }
         return fuzzyScore(term.value, in: value)
     }
 
@@ -180,9 +196,12 @@ enum SearchEngine {
     private struct SearchTerm {
         let value: String
         let wordBoundaryExpression: NSRegularExpression
+        let asciiBytes: [UInt8]?
 
         init(_ value: String) {
             self.value = value
+            let bytes = Array(value.utf8)
+            asciiBytes = !bytes.isEmpty && bytes.allSatisfy { $0 < 128 } ? bytes : nil
             wordBoundaryExpression = try! NSRegularExpression(pattern: "\\b\(NSRegularExpression.escapedPattern(for: value))")
         }
     }

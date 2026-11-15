@@ -41,6 +41,15 @@ final class SearchAndGeometryTests: XCTestCase {
         XCTAssertEqual(ranges.map { String("Café notes"[$0]) }, ["Café"])
     }
 
+    func testFuzzySearchKeepsUnicodeFallbackAndCompactMatchRanking() {
+        let compact = item("r-l-s", date: 1, pinned: false)
+        let scattered = item("r---l---s", date: 2, pinned: false)
+        let unicodeGap = item("r🧩l🧩s", date: 0, pinned: false)
+        let missing = item("r---l", date: 3, pinned: false)
+        let results = SearchEngine.search("rls", in: [missing, scattered, unicodeGap, compact])
+        XCTAssertEqual(results.map(\.id), [compact.id, unicodeGap.id, scattered.id])
+    }
+
     func testSearchOverOneThousandRecordsMeetsTarget() {
         let records = (0..<1_000).map { index in
             ClipboardSearchItem(
