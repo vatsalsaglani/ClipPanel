@@ -251,6 +251,27 @@ final class ClipboardPayloadTests: XCTestCase {
         XCTAssertTrue(supported)
     }
 
+    func testPlainHistoryDoesNotLoadEncryptionKeyUntilExplicitEncryption() async throws {
+        try await MainActor.run {
+            let container = try ModelContainer(for: Schema(ClipboardSchemaV2.models), configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+            var keyLoads = 0
+            let store = ClipboardStore(modelContext: ModelContext(container), vaultProvider: {
+                keyLoads += 1
+                return try EncryptedPayloadVault(keyData: Data(repeating: 11, count: 32))
+            })
+            let record = try store.upsert(candidate(text: "lazy encryption fixture"), historyLimit: 500)
+            _ = try store.searchItems()
+            XCTAssertEqual(try store.text(for: record), "lazy encryption fixture")
+            XCTAssertEqual(keyLoads, 0)
+            let collection = try store.createCollection(named: "Encrypted", isEncrypted: true)
+            _ = try store.updateMetadata(recordID: record.id, collectionIDs: [collection.id])
+            XCTAssertEqual(keyLoads, 1)
+            XCTAssertTrue(record.payloadData.isEmpty)
+            XCTAssertEqual(try store.text(for: record), "lazy encryption fixture")
+            XCTAssertEqual(keyLoads, 1, "Reuse the loaded key without repeated access prompts")
+        }
+    }
+
     func testSettingsValidationClampsImpossibleValues() {
         XCTAssertEqual(SettingsValidation.historyLimit(-1), 1)
         XCTAssertEqual(SettingsValidation.maximumPayloadBytes(Int.max), SettingsValidation.payloadRange.upperBound)

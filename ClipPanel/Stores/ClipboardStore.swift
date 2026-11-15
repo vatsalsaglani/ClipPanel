@@ -5,11 +5,23 @@ import SwiftData
 @MainActor
 final class ClipboardStore {
     private let modelContext: ModelContext
-    private let vault: EncryptedPayloadVault?
+    private var vault: EncryptedPayloadVault?
+    private let vaultProvider: () throws -> EncryptedPayloadVault
 
-    init(modelContext: ModelContext, vault: EncryptedPayloadVault? = nil) {
+    init(modelContext: ModelContext, vault: EncryptedPayloadVault? = nil,
+         vaultProvider: @escaping () throws -> EncryptedPayloadVault = { try EncryptedPayloadVault() }) {
         self.modelContext = modelContext
-        self.vault = vault ?? (try? EncryptedPayloadVault())
+        self.vault = vault
+        self.vaultProvider = vaultProvider
+    }
+
+    private func encryptionVault() throws -> EncryptedPayloadVault {
+        if let vault { return vault }
+        // Ordinary history and search do not need encryption-key access. Wait
+        // until an explicit encrypted read/write before asking the Keychain.
+        let loaded = try vaultProvider()
+        vault = loaded
+        return loaded
     }
 
     @discardableResult
@@ -110,7 +122,7 @@ final class ClipboardStore {
         guard let metadata = try metadata(for: record.id), let encrypted = metadata.encryptedPayloadData else {
             return record.payloadData
         }
-        guard let vault else { throw EncryptedPayloadError.unavailable }
+        let vault = try encryptionVault()
         return try vault.decrypt(encrypted)
     }
 
@@ -406,13 +418,13 @@ final class ClipboardStore {
         let selectedCollections = try collections().filter { metadata.collectionIDs.contains($0.id) }
         let shouldEncrypt = selectedCollections.contains(where: \.isEncrypted)
         if shouldEncrypt, metadata.encryptedPayloadData == nil {
-            guard let vault else { throw EncryptedPayloadError.unavailable }
+            let vault = try encryptionVault()
             let encryptedPayload = try vault.encrypt(record.payloadData)
             metadata.encryptedPayloadData = encryptedPayload
             metadata.encryptionNonce = nil
             record.payloadData = Data()
         } else if !shouldEncrypt, let encryptedPayload = metadata.encryptedPayloadData {
-            guard let vault else { throw EncryptedPayloadError.unavailable }
+            let vault = try encryptionVault()
             record.payloadData = try vault.decrypt(encryptedPayload)
             metadata.encryptedPayloadData = nil
             metadata.encryptionNonce = nil
