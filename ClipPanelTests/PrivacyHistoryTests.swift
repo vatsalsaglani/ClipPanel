@@ -68,6 +68,46 @@ final class PrivacyHistoryTests: XCTestCase {
         }
     }
 
+    func testObservableNumericSettingsNormalizeWithoutRecursiveSetters() async throws {
+        try await MainActor.run {
+            let suite = "ClipPanel.PrivacyTests.\(UUID().uuidString)"
+            let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+            defer { defaults.removePersistentDomain(forName: suite) }
+            let settings = SettingsStore(defaults: defaults)
+            var retentionChanges = 0
+            settings.onRetentionChanged = { retentionChanges += 1 }
+            settings.historyMaximumAgeDays = 7
+            settings.historyLimit = 100
+            settings.maximumPayloadBytes = 2 * 1_024 * 1_024
+            settings.pasteDelay = 0.2
+            XCTAssertEqual(retentionChanges, 2)
+            settings.historyMaximumAgeDays = -1
+            settings.historyLimit = 20_000
+            settings.maximumPayloadBytes = 0
+            settings.pasteDelay = .nan
+            XCTAssertEqual(settings.historyMaximumAgeDays, 0)
+            XCTAssertEqual(settings.historyLimit, SettingsValidation.historyRange.upperBound)
+            XCTAssertEqual(settings.maximumPayloadBytes, SettingsValidation.payloadRange.lowerBound)
+            XCTAssertEqual(settings.pasteDelay, 0.10)
+            XCTAssertEqual(retentionChanges, 4, "Normalization emits one retention change per assignment")
+            XCTAssertEqual(defaults.integer(forKey: "historyMaximumAgeDays"), 0)
+            XCTAssertEqual(defaults.integer(forKey: "historyLimit"), SettingsValidation.historyRange.upperBound)
+            XCTAssertEqual(defaults.integer(forKey: "maximumPayloadBytes"), SettingsValidation.payloadRange.lowerBound)
+            XCTAssertEqual(defaults.double(forKey: "pasteDelay"), 0.10)
+            let reloaded = SettingsStore(defaults: defaults)
+            XCTAssertEqual(reloaded.historyLimit, settings.historyLimit)
+            XCTAssertEqual(reloaded.maximumPayloadBytes, settings.maximumPayloadBytes)
+            settings.reset()
+            XCTAssertEqual(settings.historyMaximumAgeDays, 0)
+            XCTAssertEqual(settings.historyLimit, 500)
+            XCTAssertEqual(settings.maximumPayloadBytes, 20 * 1_024 * 1_024)
+            XCTAssertEqual(settings.pasteDelay, 0.10)
+            XCTAssertEqual(retentionChanges, 4, "Reset never triggers destructive history cleanup")
+            settings.historyMaximumAgeDays = 30
+            XCTAssertEqual(retentionChanges, 5, "Explicit retention edits still clean up after reset")
+        }
+    }
+
     func testAgeExpiryUsesLastCopyAndPreservesIntentionalLibraryItems() async throws {
         try await MainActor.run {
             let container = try ModelContainer(for: Schema(ClipboardSchemaV2.models), configurations: ModelConfiguration(isStoredInMemoryOnly: true))
