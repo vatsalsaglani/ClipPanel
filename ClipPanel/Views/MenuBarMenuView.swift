@@ -16,6 +16,16 @@ struct MenuBarMenuView: View {
             state.onToggleMonitoring?()
         }
 
+        if state.isMonitoring {
+            Menu("Pause For…") {
+                ForEach(MonitoringPauseDuration.allCases, id: \.self) { duration in
+                    Button(duration.title) { state.onPauseMonitoring?(duration) }
+                }
+            }
+        } else if let deadline = state.monitoringPausedUntil {
+            Text("Resumes at \(deadline.formatted(date: .omitted, time: .shortened))")
+        }
+
         Divider()
 
         Button("Clear Unpinned History") { state.onClearUnpinned?() }

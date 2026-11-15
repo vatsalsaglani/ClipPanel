@@ -13,7 +13,7 @@ final class ClipboardStore {
     }
 
     @discardableResult
-    func upsert(_ candidate: ClipboardCaptureCandidate, historyLimit: Int, now: Date = .now) throws -> ClipboardRecord {
+    func upsert(_ candidate: ClipboardCaptureCandidate, historyLimit: Int, maximumAgeDays: Int = 0, now: Date = .now) throws -> ClipboardRecord {
         let hash = candidate.contentHash
         let descriptor = FetchDescriptor<ClipboardRecord>(predicate: #Predicate { $0.contentHash == hash })
         let existing = try modelContext.fetch(descriptor).first(where: { $0.payloadData == candidate.encodedPayload })
@@ -22,6 +22,7 @@ final class ClipboardStore {
             existing.sourceBundleIdentifier = candidate.source?.bundleIdentifier ?? existing.sourceBundleIdentifier
             existing.sourceApplicationName = candidate.source?.name ?? existing.sourceApplicationName
             try modelContext.save()
+            try enforceRetention(limit: historyLimit, maximumAgeDays: maximumAgeDays, now: now)
             return existing
         }
 
@@ -40,7 +41,7 @@ final class ClipboardStore {
         )
         modelContext.insert(record)
         try modelContext.save()
-        try enforceRetention(limit: historyLimit)
+        try enforceRetention(limit: historyLimit, maximumAgeDays: maximumAgeDays, now: now)
         return record
     }
 
@@ -50,15 +51,15 @@ final class ClipboardStore {
     }
 
     func searchItems() throws -> [ClipboardSearchItem] {
-        try libraryItems().map(\.record)
+        try libraryItems(includePayloadDetails: false).map(\.record)
     }
 
-    func libraryItems() throws -> [ClipLibraryItem] {
+    func libraryItems(includePayloadDetails: Bool = true) throws -> [ClipLibraryItem] {
         let metadataByRecordID = Dictionary(uniqueKeysWithValues: try modelContext.fetch(FetchDescriptor<ClipMetadata>()).map { ($0.recordID, $0) })
         let tagsByID = Dictionary(uniqueKeysWithValues: try modelContext.fetch(FetchDescriptor<ClipTag>()).map { ($0.id, $0.name) })
         let collectionsByID = Dictionary(uniqueKeysWithValues: try modelContext.fetch(FetchDescriptor<ClipCollection>()).map { ($0.id, $0.name) })
         return try records().map { record in
-            let payload = (record.kind == .image || record.kind == .files) ? try? payload(for: record) : nil
+            let payload = includePayloadDetails && (record.kind == .image || record.kind == .files) ? try? payload(for: record) : nil
             let fileURLs = payload.map(PreviewBuilder.fileURLs(from:)) ?? []
             let metadata = metadataByRecordID[record.id]
             let snapshot = metadata.map(ClipMetadataSnapshot.init)
@@ -230,14 +231,29 @@ final class ClipboardStore {
         try modelContext.save()
     }
 
-    func enforceRetention(limit: Int) throws {
-        let unpinned = try records().filter { !$0.isPinned }
-        guard unpinned.count > limit else { return }
-        for record in unpinned.dropFirst(limit) {
-            if let metadata = try metadata(for: record.id) { modelContext.delete(metadata) }
-            modelContext.delete(record)
+    /// Automatic cleanup applies only to disposable capture history. Library ownership and
+    /// encryption are inspected as metadata, without decrypting or touching payload bytes.
+    @discardableResult
+    func enforceRetention(limit: Int, maximumAgeDays: Int = 0, now: Date = .now) throws -> Int {
+        let allRecords = try records()
+        guard maximumAgeDays > 0 || allRecords.count > max(limit, 0) else { return 0 }
+        let metadataByRecordID = Dictionary(uniqueKeysWithValues: try modelContext.fetch(FetchDescriptor<ClipMetadata>()).map { ($0.recordID, $0) })
+        let disposable = allRecords.filter { record in
+            guard !record.isPinned else { return false }
+            guard let metadata = metadataByRecordID[record.id] else { return true }
+            return !metadata.isSavedSnippet && !metadata.isFavorite && metadata.collectionIDs.isEmpty && metadata.encryptedPayloadData == nil
         }
-        try modelContext.save()
+        let cutoff = maximumAgeDays > 0 ? now.addingTimeInterval(-TimeInterval(maximumAgeDays) * 86_400) : nil
+        var removed = 0
+        for (index, record) in disposable.enumerated() {
+            let expired = cutoff.map { record.lastCopiedAt < $0 } ?? false
+            guard index >= max(limit, 0) || expired else { continue }
+            if let metadata = metadataByRecordID[record.id] { modelContext.delete(metadata) }
+            modelContext.delete(record)
+            removed += 1
+        }
+        if removed > 0 { try modelContext.save() }
+        return removed
     }
 
     func setPinned(_ record: ClipboardRecord, isPinned: Bool) throws {
