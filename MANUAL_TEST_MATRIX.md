@@ -28,3 +28,13 @@ Also verify:
 - App Shortcuts and `clipctl open`, `clipctl library`, and `clipctl search <query>` route to the expected local view.
 
 Do not automate privacy permission resets: they are destructive system state changes.
+
+## Keyboard, recovery, privacy, and update regression checks
+
+- With active type/search filters, Command-1 through Command-9 must paste the correspondingly numbered displayed row. Hold arrows to verify selection remains visible; out-of-range shortcuts must do nothing.
+- Type a multiword query normally, browse with arrows and press Space to preview, then type again. Confirm text entry, Command-Y, and the two-step Escape behavior. Preview long text and a large image; the original paste must remain complete.
+- Disable auto-paste permission: with copy fallback enabled, select a clip and verify a visible nonactivating copy notice and manual Command-V. With fallback disabled, verify the current clipboard is unchanged. Option-Return must still copy. Switch apps or copy a different item during the paste delay and verify no misplaced keystroke or clipboard overwrite occurs.
+- Use each text action, including Extract URLs with repeated links and text without links; confirm the original record stays intact and successful actions create/copy the transformed result.
+- Pause monitoring for a timed duration; copy while paused and resume manually or at the deadline. Confirm paused copies are not captured. Relaunch during a pause; confirm the remaining pause persists. Choose an ignored running app and verify only new copies are excluded.
+- In disposable test history, enable age expiry and lower the count limit; confirm expired unsaved history is removed while pins, snippets, favorites, collection items, and encrypted items remain. Do not enable expiry on real history just to test it.
+- About must display the bundle version and open the releases page only on request. Restart must reopen the same bundle, leave exactly one ClipPanel running, and preserve history/settings. Confirm permission recovery after a manual macOS grant and restart.

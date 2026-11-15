@@ -85,16 +85,19 @@ final class ClipboardPanelController: NSObject {
         feedback.backgroundColor = .clear
         feedback.hasShadow = true
         feedback.collectionBehavior = [.transient, .fullScreenAuxiliary, .moveToActiveSpace]
-        feedback.contentView = NSHostingView(rootView:
+        let content = NSHostingView(rootView:
             Label(message, systemImage: "doc.on.clipboard")
                 .font(.callout)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(width: 398, alignment: .leading)
                 .padding(16)
-                .frame(maxWidth: .infinity)
                 .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
                 .accessibilityLabel(message)
         )
+        feedback.contentView = content
         let screens = NSScreen.screens.map { ScreenGeometry(frame: $0.frame, visibleFrame: $0.visibleFrame) }
-        feedback.setFrame(PanelPositioner.frame(panelSize: CGSize(width: 430, height: 72), pointer: NSEvent.mouseLocation, screens: screens, anchor: .screenCenter), display: true)
+        let height = max(72, content.fittingSize.height)
+        feedback.setFrame(PanelPositioner.frame(panelSize: CGSize(width: 430, height: height), pointer: NSEvent.mouseLocation, screens: screens, anchor: .screenCenter), display: true)
         feedback.orderFrontRegardless()
         feedbackPanel = feedback
         feedbackTask = Task { [weak self] in
@@ -139,6 +142,13 @@ final class ClipboardPanelController: NSObject {
                 return nil
             }
             switch event.keyCode {
+            case 48:
+                self.state.resultsHaveKeyboardFocus = false
+                return event
+            case 3 where flags == .command:
+                self.state.resultsHaveKeyboardFocus = false
+                self.state.focusGeneration += 1
+                return nil
             case 126: self.state.moveSelection(by: -1); return nil
             case 125: self.state.moveSelection(by: 1); return nil
             case 53:

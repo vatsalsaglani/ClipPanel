@@ -113,7 +113,6 @@ struct ClipboardPanelView: View {
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         .onAppear { searchFocused = true }
         .onChange(of: state.focusGeneration) { _, _ in searchFocused = true }
-        .onChange(of: searchFocused) { _, focused in if focused { state.resultsHaveKeyboardFocus = false } }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Clipboard history")
     }

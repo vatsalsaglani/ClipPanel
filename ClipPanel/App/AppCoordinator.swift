@@ -27,7 +27,8 @@ final class AppCoordinator {
         panelAnchorProvider: { [weak self] in self?.settings.panelAnchor ?? .mousePointer },
         panelDensityProvider: { [weak self] in self?.settings.panelDensity ?? .comfortable },
         keepSearchQueryProvider: { [weak self] in self?.settings.keepSearchQuery ?? false },
-        caretPointProvider: { [weak self] in self?.caretService.caretPoint() }
+        caretPointProvider: { [weak self] in self?.caretService.caretPoint() },
+        onWillPresent: { [weak self] in self?.pasteService.cancelPendingPaste() }
     )
 
     init() {
@@ -84,7 +85,7 @@ final class AppCoordinator {
             self?.pasteboardMonitor.setMonitoringEnabled(enabled)
             self?.updateMonitoringStatus()
         }
-        settings.onRetentionChanged = { [weak self] in self?.maintainHistory() }
+        settings.onRetentionChanged = { [weak self] in self?.maintainHistory(enforceCountLimit: true) }
         settings.onDockIconVisibilityChanged = { visible in
             NSApp.setActivationPolicy(visible ? .regular : .accessory)
         }
@@ -106,6 +107,9 @@ final class AppCoordinator {
             return try? self.clipboardStore.payload(for: record)
         }
         panelState.onIntent = { [weak self] intent in self?.handlePanelIntent(intent) }
+        panelState.onTransformRequested = { [weak self] transformation in
+            self?.transformPanelSelection(using: transformation)
+        }
     }
 
     func start() {
@@ -176,9 +180,12 @@ final class AppCoordinator {
         }
     }
 
-    private func maintainHistory() {
+    private func maintainHistory(enforceCountLimit: Bool = false) {
         do {
-            let removed = try clipboardStore.enforceRetention(limit: settings.historyLimit, maximumAgeDays: settings.historyMaximumAgeDays)
+            // Count limits apply on capture and explicit retention edits. A passive
+            // maintenance tick must not prune history solely because settings reset.
+            let limit = enforceCountLimit ? settings.historyLimit : Int.max
+            let removed = try clipboardStore.enforceRetention(limit: limit, maximumAgeDays: settings.historyMaximumAgeDays)
             if removed > 0 { refreshPanelResults(query: panelState.query) }
         } catch {
             AppLogger.persistence.error("History retention cleanup failed")
@@ -275,18 +282,23 @@ final class AppCoordinator {
             let destination = panelController.priorApplication
             Task { @MainActor [weak self] in
                 guard let self else { return }
+                var didRestore = false
                 let result = await pasteService.restoreAndPerform(
                     record: record,
                     mode: mode,
                     previousApplication: destination,
                     settings: settings,
-                    onRestored: { self.panelController.dismiss() }
+                    onRestored: {
+                        didRestore = true
+                        self.panelController.dismiss()
+                    }
                 )
                 switch result {
                 case .failed(let message):
                     AppLogger.paste.notice("Paste did not complete")
                     panelState.statusMessage = message
                     appState.statusMessage = message
+                    if didRestore { panelController.showPasteFeedback(message: message) }
                 case .superseded:
                     break
                 case .pasted:
@@ -297,6 +309,7 @@ final class AppCoordinator {
                     try? clipboardStore.markPasted(record)
                     appState.statusMessage = message
                     panelState.statusMessage = message
+                    panelController.showPasteFeedback(message: message)
                 }
             }
         case .openSettings:
@@ -319,6 +332,34 @@ final class AppCoordinator {
         case .pasted:
             try? clipboardStore.markPasted(record)
             appState.statusMessage = "Copied to clipboard"
+        }
+    }
+
+    private func transformPanelSelection(using transformation: ClipboardTextTransformation) {
+        guard let item = panelState.selectedItem,
+              let original = try? clipboardStore.record(id: item.id) else { return }
+        do {
+            guard let transformed = try clipboardStore.createTransformedRecord(from: original, transformation: transformation) else {
+                panelState.statusMessage = transformation == .extractURLs
+                    ? "No web URLs were found in this clip."
+                    : "This clip has no text to transform."
+                return
+            }
+            switch pasteService.copy(record: transformed) {
+            case .failed(let message):
+                panelState.statusMessage = message
+            case .copiedOnly, .pasted:
+                panelState.typeFilter = .all
+                panelState.query = ""
+                refreshPanelResults(query: "")
+                panelState.select(transformed.id)
+                panelState.statusMessage = "Transformed text copied. Press Return to paste."
+                panelState.focusGeneration += 1
+            case .superseded:
+                break
+            }
+        } catch {
+            panelState.statusMessage = "ClipPanel could not create the transformed copy."
         }
     }
 
@@ -349,6 +390,7 @@ final class AppCoordinator {
                 appState.statusMessage = "Pasted \(records.count) queued clips"
             case .copiedOnly(let message), .failed(let message):
                 appState.statusMessage = message
+                panelController.showPasteFeedback(message: message)
             }
         }
     }
