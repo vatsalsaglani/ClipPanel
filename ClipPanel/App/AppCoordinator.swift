@@ -113,6 +113,7 @@ final class AppCoordinator {
     }
 
     func showLibrary() {
+        pasteService.cancelPendingPaste()
         libraryController.show(
             store: clipboardStore,
             onCopy: { [weak self] id in self?.copyLibraryRecord(id) },
@@ -209,11 +210,9 @@ final class AppCoordinator {
             if case .copyOnly = mode {
                 // Copy-only never needs the post-event permission.
             } else if settings.autoPasteEnabled, permissionService.autoPasteState != .granted {
-                guard permissionService.requestAutoPasteAccess() == .granted else {
-                    panelState.statusMessage = "Auto-paste is blocked by macOS. Enable ClipPanel in System Settings → Privacy & Security → Accessibility, then retry. Option-Return copies without pasting."
-                    AppLogger.permissions.notice("Paste stopped: post-event access denied")
-                    return
-                }
+                // The explicit paste action may request permission, but PasteService
+                // decides whether the user's copy fallback preference allows recovery.
+                _ = permissionService.requestAutoPasteAccess()
             }
             let destination = panelController.priorApplication
             Task { @MainActor [weak self] in
@@ -227,8 +226,11 @@ final class AppCoordinator {
                 )
                 switch result {
                 case .failed(let message):
-                    AppLogger.paste.notice("Paste failed during restoration")
+                    AppLogger.paste.notice("Paste did not complete")
                     panelState.statusMessage = message
+                    appState.statusMessage = message
+                case .superseded:
+                    break
                 case .pasted:
                     AppLogger.paste.notice("Paste events posted")
                     try? clipboardStore.markPasted(record)
@@ -236,6 +238,7 @@ final class AppCoordinator {
                     AppLogger.paste.notice("Paste completed with copy-only fallback")
                     try? clipboardStore.markPasted(record)
                     appState.statusMessage = message
+                    panelState.statusMessage = message
                 }
             }
         case .openSettings:
@@ -248,6 +251,8 @@ final class AppCoordinator {
     private func copyLibraryRecord(_ id: UUID) {
         guard let record = try? clipboardStore.record(id: id) else { return }
         switch pasteService.copy(record: record) {
+        case .superseded:
+            break
         case .failed(let message):
             appState.statusMessage = message
         case .copiedOnly(let message):
@@ -279,6 +284,8 @@ final class AppCoordinator {
             guard let self else { return }
             let result = await pasteService.pasteQueue(records: records, previousApplication: libraryController.priorApplication, settings: settings)
             switch result {
+            case .superseded:
+                break
             case .pasted:
                 records.forEach { try? clipboardStore.markPasted($0) }
                 appState.statusMessage = "Pasted \(records.count) queued clips"
