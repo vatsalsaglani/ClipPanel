@@ -23,8 +23,10 @@ xcodebuild -project ClipPanel.xcodeproj -scheme ClipPanel -configuration Debug -
 On first launch, ClipPanel explains each capability before enabling it:
 
 - Clipboard monitoring is off until enabled in onboarding. It reads supported clipboard data locally while enabled.
-- Auto-paste is optional. The permission request is issued only after an explicit onboarding or Settings action. When unavailable, ClipPanel restores the item to the clipboard and reports copy-only success.
+- Auto-paste is optional. Onboarding verifies permission before finishing with auto-paste enabled, or lets you explicitly choose Copy Only. Permission requests happen only from onboarding, Settings, or an explicit paste action. When permission is missing, the panel explains how to enable it; Option-Return copies without auto-pasting.
 - Launch at login is optional and uses `SMAppService.mainApp`.
+
+After approving auto-paste in macOS Settings, quit and reopen ClipPanel if it still reports permission required. Local ad-hoc builds can require re-approval after rebuilding; approve the exact running copy using **Privacy → Show This ClipPanel in Finder**.
 
 ClipPanel does not send network requests, include analytics, create accounts, or log clipboard values/search queries. See [PRIVACY.md](PRIVACY.md).
 

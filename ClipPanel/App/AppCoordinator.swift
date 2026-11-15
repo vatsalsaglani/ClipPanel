@@ -85,6 +85,7 @@ final class AppCoordinator {
 
     func start() {
         AppLogger.lifecycle.info("ClipPanel launched")
+        AppLogger.permissions.notice("Auto-paste access granted: \(self.permissionService.autoPasteState == .granted); enabled: \(self.settings.autoPasteEnabled)")
         guard ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil else {
             AppLogger.lifecycle.debug("Skipping menu-bar services under XCTest")
             return
@@ -136,7 +137,7 @@ final class AppCoordinator {
     }
 
     private func requestAutoPaste() {
-        appState.statusMessage = permissionService.requestAutoPasteAccess() == .granted ? "Auto-paste permission is available" : "Auto-paste permission was not granted"
+        appState.statusMessage = permissionService.requestAutoPasteAccess(openSettingsIfNeeded: true) == .granted ? "Auto-paste permission is available" : "Enable this copy of ClipPanel in macOS Settings. If it is already enabled, remove the old entry and add the running app again, then quit and reopen ClipPanel."
     }
 
     private func requestAccessibility() {
@@ -193,8 +194,13 @@ final class AppCoordinator {
                 refreshPanelResults(query: panelState.query)
             }
         case .pasteOriginal, .pastePlainText, .copyOnly:
+            AppLogger.paste.notice("Paste intent received")
             guard let item = panelState.selectedItem,
-                  let record = try? clipboardStore.record(id: item.id) else { return }
+                  let record = try? clipboardStore.record(id: item.id) else {
+                panelState.statusMessage = "Select a clipboard item to paste."
+                AppLogger.paste.notice("Paste stopped: no available selection")
+                return
+            }
             let mode: PasteMode = switch intent {
             case .pastePlainText: .plainText
             case .copyOnly: .copyOnly
@@ -203,26 +209,33 @@ final class AppCoordinator {
             if case .copyOnly = mode {
                 // Copy-only never needs the post-event permission.
             } else if settings.autoPasteEnabled, permissionService.autoPasteState != .granted {
-                _ = permissionService.requestAutoPasteAccess()
-                panelState.statusMessage = "Allow Auto-Paste in macOS settings, then press Return again."
-                return
+                guard permissionService.requestAutoPasteAccess() == .granted else {
+                    panelState.statusMessage = "Auto-paste is blocked by macOS. Enable ClipPanel in System Settings → Privacy & Security → Accessibility, then retry. Option-Return copies without pasting."
+                    AppLogger.permissions.notice("Paste stopped: post-event access denied")
+                    return
+                }
             }
+            let destination = panelController.priorApplication
             Task { @MainActor [weak self] in
                 guard let self else { return }
-                let result = await pasteService.restoreAndPerform(record: record, mode: mode, previousApplication: panelController.priorApplication, settings: settings)
+                let result = await pasteService.restoreAndPerform(
+                    record: record,
+                    mode: mode,
+                    previousApplication: destination,
+                    settings: settings,
+                    onRestored: { self.panelController.dismiss() }
+                )
                 switch result {
                 case .failed(let message):
+                    AppLogger.paste.notice("Paste failed during restoration")
                     panelState.statusMessage = message
                 case .pasted:
+                    AppLogger.paste.notice("Paste events posted")
                     try? clipboardStore.markPasted(record)
-                    panelController.dismiss()
                 case .copiedOnly(let message):
+                    AppLogger.paste.notice("Paste completed with copy-only fallback")
                     try? clipboardStore.markPasted(record)
-                    panelState.statusMessage = message
-                    Task { @MainActor [weak self] in
-                        try? await Task.sleep(for: .milliseconds(850))
-                        self?.panelController.dismiss()
-                    }
+                    appState.statusMessage = message
                 }
             }
         case .openSettings:

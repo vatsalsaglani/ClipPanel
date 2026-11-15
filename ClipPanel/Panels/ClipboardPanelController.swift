@@ -59,7 +59,8 @@ final class ClipboardPanelController: NSObject {
         let point = anchor == .textCaret ? (caretPointProvider() ?? NSEvent.mouseLocation) : NSEvent.mouseLocation
         panel.setFrame(PanelPositioner.frame(panelSize: desiredSize, pointer: point, screens: geometries, anchor: anchor), display: true)
         panel.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
+        // A nonactivating panel borrows keyboard focus without deactivating the
+        // destination app. Ordering it out returns focus to that app’s input.
         installKeyMonitor()
         state.focusGeneration += 1
     }
@@ -87,7 +88,8 @@ final class ClipboardPanelController: NSObject {
             case 126: self.state.moveSelection(by: -1); return nil
             case 125: self.state.moveSelection(by: 1); return nil
             case 53: self.state.send(.dismiss); return nil
-            case 36:
+            case 36, 76:
+                AppLogger.panel.notice("Paste key received")
                 if flags.contains(.option) { self.state.send(.copyOnly) }
                 else if flags.contains(.shift) { self.state.send(.pastePlainText) }
                 else { self.state.send(.pasteOriginal) }

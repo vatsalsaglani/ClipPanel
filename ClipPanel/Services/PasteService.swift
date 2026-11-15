@@ -33,7 +33,8 @@ final class PasteService {
         record: ClipboardRecord,
         mode: PasteMode,
         previousApplication: NSRunningApplication?,
-        settings: SettingsStore
+        settings: SettingsStore,
+        onRestored: () -> Void = {}
     ) async -> PasteResult {
         guard let payload = try? payloadProvider(record) else {
             return .failed("The saved clipboard item could not be decoded.")
@@ -41,6 +42,8 @@ final class PasteService {
         guard restore(payload: payload, sourceBundleIdentifier: record.sourceBundleIdentifier, mode: mode) else {
             return .failed("ClipPanel could not restore this clipboard item.")
         }
+        // Release the panel’s keyboard focus only after clipboard restoration succeeds.
+        onRestored()
         if mode == .copyOnly { return .copiedOnly("Copied to clipboard") }
         if mode == .plainText, PreviewBuilder.text(from: payload) == nil {
             return .copiedOnly("This item has no plain-text representation; original content was copied.")
@@ -51,12 +54,14 @@ final class PasteService {
         guard let previousApplication, !previousApplication.isTerminated else {
             return .copiedOnly("Copied to clipboard; the previous app is no longer available.")
         }
-        guard previousApplication.activate() else {
+        guard await activateDestination(previousApplication) else {
             return .copiedOnly("Copied to clipboard; ClipPanel could not reactivate the previous app.")
         }
         let nanoseconds = UInt64(SettingsValidation.pasteDelay(settings.pasteDelay) * 1_000_000_000)
         try? await Task.sleep(nanoseconds: nanoseconds)
-        guard postCommandV() else {
+        guard !Task.isCancelled, previousApplication.isActive,
+              NSWorkspace.shared.frontmostApplication?.processIdentifier == previousApplication.processIdentifier,
+              postCommandV() else {
             return .copiedOnly("Copied to clipboard; Command-V could not be sent.")
         }
         return .pasted
@@ -129,6 +134,22 @@ final class PasteService {
         guard pasteboard.writeObjects(items) else { return false }
         monitor.consumeSelfWrite(changeCount: pasteboard.changeCount)
         return true
+    }
+
+    private func activateDestination(_ application: NSRunningApplication) async -> Bool {
+        guard application.activate() else { return false }
+        // Activation is asynchronous; the configured paste delay alone is not
+        // evidence that the destination has actually regained keyboard focus.
+        for _ in 0..<50 {
+            guard !Task.isCancelled, !application.isTerminated else { return false }
+            if application.isActive,
+               NSWorkspace.shared.frontmostApplication?.processIdentifier == application.processIdentifier {
+                return true
+            }
+            do { try await Task.sleep(for: .milliseconds(20)) }
+            catch { return false }
+        }
+        return false
     }
 
     private func postCommandV() -> Bool {

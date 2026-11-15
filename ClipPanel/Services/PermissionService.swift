@@ -18,9 +18,17 @@ final class PermissionService {
     }
 
     /// Call only from an explicit auto-paste action, onboarding, or Settings.
-    func requestAutoPasteAccess() -> AutoPastePermissionState {
+    func requestAutoPasteAccess(openSettingsIfNeeded: Bool = false) -> AutoPastePermissionState {
         guard !CGPreflightPostEventAccess() else { return .granted }
         _ = CGRequestPostEventAccess()
-        return autoPasteState
+        let state = autoPasteState
+        if state != .granted, openSettingsIfNeeded,
+           let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
+            // macOS may decline to show another permission prompt after the
+            // first request. Give explicit Settings/onboarding actions a path
+            // to the approval screen even in that case.
+            NSWorkspace.shared.open(url)
+        }
+        return state
     }
 }

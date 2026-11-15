@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ClipboardPanelView: View {
     @Bindable var state: ClipboardPanelState
+    @FocusState private var searchFocused: Bool
     let density: PanelDensity
 
     var body: some View {
@@ -10,6 +11,7 @@ struct ClipboardPanelView: View {
                 Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
                 TextField("Search clipboard history", text: $state.query)
                     .textFieldStyle(.plain)
+                    .focused($searchFocused)
                 if !state.query.isEmpty {
                     Button { state.query = "" } label: { Image(systemName: "xmark.circle.fill") }
                         .buttonStyle(.plain)
@@ -19,6 +21,14 @@ struct ClipboardPanelView: View {
             }
             .padding(14)
 
+            if let status = state.statusMessage {
+                Text(status)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 14)
+                    .padding(.bottom, 8)
+            }
             Divider()
             Group {
                 if state.results.isEmpty {
@@ -60,6 +70,8 @@ struct ClipboardPanelView: View {
             .padding(.vertical, 10)
         }
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .onAppear { searchFocused = true }
+        .onChange(of: state.focusGeneration) { _, _ in searchFocused = true }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Clipboard history")
     }
